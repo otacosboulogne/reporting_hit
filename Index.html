@@ -45,7 +45,82 @@ function num(id){return parseFloat(document.getElementById(id)?.value)||0}
 function inventorySummary(id){if(document.getElementById(id+'_skip')?.value==='NON_CONCERNE')return '<span class="skip-badge">Non concerné</span>';return `${esc(valueOf(id+'_carton'))} cartons / ${esc(valueOf(id+'_sachet'))} sachets / ${esc(valueOf(id+'_kg'))} kg`; }
 function showSummary(){const ca=num('caRestaurant')+num('caUber')+num('caDeliveroo')+num('caCC');const cmd=num('cmdRestaurant')+num('cmdUber')+num('cmdDeliveroo')+num('cmdCC');const tm=cmd?ca/cmd:0;const pertes=num('pertes');document.getElementById('sumGrid').innerHTML=`<div class="sum-item"><span>Restaurant</span><strong>${esc(valueOf('restaurant'))}</strong></div><div class="sum-item"><span>Service</span><strong>${esc(valueOf('service'))}</strong></div><div class="sum-item"><span>CA total</span><strong>${ca.toFixed(2)} €</strong></div><div class="sum-item"><span>Commandes</span><strong>${cmd}</strong></div><div class="sum-item"><span>Ticket moyen</span><strong>${tm.toFixed(2)} €</strong></div><div class="sum-item"><span>Pertes</span><strong>${pertes.toFixed(2)} €</strong></div>`;document.getElementById('sumDetails').innerHTML=`<b>Responsable :</b> ${esc(valueOf('responsable'))}<br><b>Date :</b> ${esc(valueOf('dateReporting'))}<br><br><b>CA :</b> Restaurant ${num('caRestaurant').toFixed(2)} € — Uber ${num('caUber').toFixed(2)} € — Deliveroo ${num('caDeliveroo').toFixed(2)} € — C&C ${num('caCC').toFixed(2)} €<br><b>Inventaire :</b> Frites ${inventorySummary('invFrites')} — Merguez ${inventorySummary('invMerguez')} — Poulet mariné ${inventorySummary('invPoulet')}<br><b>Rush :</b> Friture ${esc(valueOf('rushFriture'))}, Envoi ${esc(valueOf('rushEnvoi'))}, Pliage ${esc(valueOf('rushPliage'))}, Toaster ${esc(valueOf('rushToaster'))}, Caisse ${esc(valueOf('rushCaisse'))}<br><b>Boissons / Desserts :</b> ${num('venteBoisson')} / ${num('venteDessert')}<br><b>Repas :</b> ${esc(valueOf('repasEmploye'))} — ${num('nbRepas')} repas<br><b>Réduction :</b> ${esc(valueOf('reduction'))} — ${num('montantReduction').toFixed(2)} €<br><b>Écart caisse :</b> ${esc(valueOf('ecartCaisse'))} — ${num('montantEcart').toFixed(2)} €<br><br><b>Appréciation :</b><br>${esc(valueOf('appreciation'))}`;document.getElementById('summary').classList.add('show');document.getElementById('sendBtn').classList.add('show');document.getElementById('summary').scrollIntoView({behavior:'smooth',block:'start'})}
 function collectReport(){const data={};steps.forEach(s=>{if(!isVisibleStep(s))return;if(s.type==='inventory')data[s.id]=document.getElementById(s.id+'_skip')?.value==='NON_CONCERNE'?{status:'NON_CONCERNE'}:{carton:valueOf(s.id+'_carton'),sachet:valueOf(s.id+'_sachet'),kg:valueOf(s.id+'_kg'),livraison:valueOf(s.id+'_livraison'),colis:valueOf(s.id+'_colis')};else data[s.id]=valueOf(s.id)});return data}
-function sendReport(){const data=collectReport();console.log('REPORTING',data);alert('Reporting prêt à envoyer. Prochaine étape : connecter à Google Sheets.')}
+const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwnqNGPL0rPU1NQu9iydpIXurQVzEZTP19yU--pF3AfktajWWH7Ufkne02J3eQ3LaPl1A/exec';
+function mapToAppsScriptPayload(d){
+  const inv=(key)=>d[key]||{};
+  const status=(key)=>inv(key).status==='NON_CONCERNE'?'NON_CONCERNE':'CONCERNE';
+  return {
+    dateReporting:d.dateReporting||'',
+    restaurant:d.restaurant||'',
+    responsable:d.responsable||'',
+    service:d.service||'',
+    caRestaurant:Number(d.caRestaurant||0),
+    cmdRestaurant:Number(d.cmdRestaurant||0),
+    caUber:Number(d.caUber||0),
+    cmdUber:Number(d.cmdUber||0),
+    caDeliveroo:Number(d.caDeliveroo||0),
+    cmdDeliveroo:Number(d.cmdDeliveroo||0),
+    caCC:Number(d.caCC||0),
+    cmdCC:Number(d.cmdCC||0),
+    fritesCarton:Number(inv('invFrites').carton||0),
+    fritesSachet:Number(inv('invFrites').sachet||0),
+    fritesKg:Number(inv('invFrites').kg||0),
+    fritesLivraison:inv('invFrites').livraison||'',
+    fritesColis:Number(inv('invFrites').colis||0),
+    merguezCheck:status('invMerguez'),
+    merguezCarton:Number(inv('invMerguez').carton||0),
+    merguezSachet:Number(inv('invMerguez').sachet||0),
+    merguezKg:Number(inv('invMerguez').kg||0),
+    merguezLivraison:inv('invMerguez').livraison||'',
+    merguezColis:Number(inv('invMerguez').colis||0),
+    pouletCheck:status('invPoulet'),
+    pouletCarton:Number(inv('invPoulet').carton||0),
+    pouletSachet:Number(inv('invPoulet').sachet||0),
+    pouletKg:Number(inv('invPoulet').kg||0),
+    pouletLivraison:inv('invPoulet').livraison||'',
+    pouletColis:Number(inv('invPoulet').colis||0),
+    rushFriture:d.rushFriture||'',
+    rushEnvoie:d.rushEnvoi||'',
+    rushPliage:d.rushPliage||'',
+    rushToaster:d.rushToaster||'',
+    rushCaisse:d.rushCaisse||'',
+    venteBoisson:Number(d.venteBoisson||0),
+    venteDessert:Number(d.venteDessert||0),
+    nbRepas:Number(d.nbRepas||0),
+    pertes:Number(d.pertes||0),
+    reduction:d.reduction||'',
+    montantReduction:Number(d.montantReduction||0),
+    descReduction:d.descReduction||'',
+    ecartCaisse:Number(d.montantEcart||0),
+    appreciation:d.appreciation||''
+  };
+}
+async function sendReport(){
+  const raw=collectReport();
+  const data=mapToAppsScriptPayload(raw);
+  const btn=document.getElementById('sendBtn');
+  const oldText=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='Envoi en cours…';
+  try{
+    const res=await fetch(APPS_SCRIPT_URL,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(data)
+    });
+    const txt=await res.text();
+    let result={};
+    try{result=JSON.parse(txt)}catch(e){}
+    if(result.success===false) throw new Error(result.message||result.error||'Erreur Apps Script');
+    alert('✅ Reporting enregistré dans Google Sheets et envoyé sur Telegram.');
+  }catch(err){
+    console.error(err);
+    alert('❌ Erreur d’envoi : '+(err.message||err));
+  }finally{
+    btn.disabled=false;
+    btn.textContent=oldText;
+  }
+}
 function resetAll(){if(!confirm('Effacer toute la saisie ?'))return;document.querySelectorAll('input,select,textarea').forEach(el=>{if(el.type==='radio')el.checked=false;else el.value=''});document.getElementById('dateReporting').value=today();document.getElementById('summary').classList.remove('show');document.getElementById('sendBtn').classList.remove('show');reveal()}
 render();
 </script>
