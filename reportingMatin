@@ -1,8 +1,6 @@
 const SPREADSHEET_ID = "15_AjYo2dj4E4QVcx0x-KkXgSbKkElNc727oC1E0qhlA";
 const SHEET_NAME = "Reporting";
 
-const TELEGRAM_TOKEN = "8837472219:AAHX8fXnc_Uw7G98yh_cUt_NmOxTQFdQeDE";
-const TELEGRAM_CHAT_ID = "-1003946915518";
 
 const RESTAURANTS_PREVISIONNEL = ["Boulogne", "Armentières"];
 
