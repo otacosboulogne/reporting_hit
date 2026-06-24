@@ -1,213 +1,801 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Reporting Compétition Restaurants - Matin V9</title>
-<style>
-:root{
-  --orange:#ff7900;--orange2:#ffb000;--blue:#102a56;--navy:#071528;--bg:#f4f7fb;--card:#ffffff;--text:#172033;--muted:#667085;--line:#dbe4f0;--soft:#f8fafc;--success:#16a34a;--danger:#dc2626;--warn:#f59e0b;--shadow:0 18px 45px rgba(16,42,86,.10);--radius:20px;
+const SPREADSHEET_ID = "15_AjYo2dj4E4QVcx0x-KkXgSbKkElNc727oC1E0qhlA";
+const SHEET_NAME = "Reporting";
+
+const TELEGRAM_TOKEN = "8837472219:AAHX8fXnc_Uw7G98yh_cUt_NmOxTQFdQeDE";
+const TELEGRAM_CHAT_ID = "-1003946915518";
+
+const RESTAURANTS_PREVISIONNEL = ["Boulogne", "Armentières"];
+
+const FRITES_KG_PAR_CARTON = 10;
+const FRITES_KG_PAR_SACHET = 2.5;
+const PRIX_KG_FRITES = 1.72;
+const TAUX_THEORIQUE_FRITES = 0.029;
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const service = normalize(data.service);
+
+    creerOngletsPrevisionnelsSiBesoin();
+    enregistrerDansSheet(data);
+
+    if (!service.includes("matin")) {
+      envoyerTelegram(data);
+    }
+
+    return jsonResponse({
+      success: true,
+      message: service.includes("matin")
+        ? "Stock matin enregistré"
+        : "Reporting enregistré et envoyé Telegram"
+    });
+
+  } catch (error) {
+    return jsonResponse({
+      success: false,
+      message: error.message
+    });
+  }
 }
-*{box-sizing:border-box}html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;background:radial-gradient(circle at top left,rgba(255,121,0,.12),transparent 28%),linear-gradient(180deg,#eef4ff 0%,#fff8ef 45%,#f8fafc 100%);color:var(--text);font-size:13px}.app{max-width:1220px;margin:auto;padding:14px 12px 110px}.hero{position:relative;background:linear-gradient(135deg,var(--blue),var(--navy));color:#fff;border-radius:28px;padding:20px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px}.hero:before{content:"";position:absolute;right:-80px;top:-90px;width:280px;height:280px;border-radius:999px;background:rgba(255,121,0,.22)}.hero-content{position:relative;z-index:1}.brand{display:flex;align-items:center;justify-content:space-between;gap:16px}.brand-left{display:flex;align-items:center;gap:14px}.logo{width:58px;height:58px;border-radius:18px;background:#000;display:grid;place-items:center;border:1px solid rgba(255,255,255,.18);font-weight:1000;font-size:12px;letter-spacing:.2px}.title h1{margin:0;font-size:24px;line-height:1.05}.title p{margin:6px 0 0;color:#cbd5e1;font-size:12px;font-weight:800}.version{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.18);padding:9px 12px;border-radius:999px;font-size:11px;font-weight:1000;white-space:nowrap}.competition{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}.score-card{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:14px}.score-card span{display:block;color:#cbd5e1;text-transform:uppercase;letter-spacing:.35px;font-size:10px;font-weight:1000}.score-card strong{display:block;margin-top:5px;font-size:22px}.score-card small{display:block;margin-top:4px;color:#e5e7eb;font-size:11px;font-weight:800}.progress-wrap{height:9px;background:rgba(255,255,255,.16);border-radius:99px;overflow:hidden;margin-top:15px}.progress{height:100%;width:0;background:linear-gradient(90deg,var(--orange),var(--orange2));transition:.25s}.progress-text{margin-top:8px;color:#e5e7eb;font-size:11px;font-weight:1000}.panel,.block{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}.panel{padding:14px;margin-bottom:12px}.block{padding:16px;margin-bottom:12px}.block.hidden,.hidden{display:none!important}.section-gate{border:1px dashed #cbd5e1;background:rgba(255,255,255,.72);border-radius:20px;padding:16px;text-align:center;color:var(--muted);font-weight:850}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.field{display:flex;flex-direction:column;gap:5px;min-width:0}label{font-size:11px;color:var(--blue);font-weight:950;line-height:1.25}input,select,textarea{width:100%;border:1.3px solid var(--line);border-radius:14px;padding:10px 11px;background:#fff;color:var(--text);outline:none;font:inherit;font-size:13px;font-weight:750;min-height:42px}textarea{min-height:82px;resize:vertical;line-height:1.45}input:focus,select:focus,textarea:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(255,121,0,.13)}.invalid{border-color:var(--danger)!important;box-shadow:0 0 0 3px rgba(220,38,38,.12)!important}.block-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}.block-title{margin:0;color:var(--blue);font-size:18px;font-weight:1000}.block-help{margin-top:4px;color:var(--muted);font-size:11px;font-weight:750}.badge{background:#eef4ff;color:var(--blue);border:1px solid #dbeafe;border-radius:999px;padding:6px 9px;font-size:10px;font-weight:1000;white-space:nowrap}.badge.orange{background:#fff2e6;color:#9a4a00;border-color:#fed7aa}.badge.ok{background:#ecfdf5;color:#166534;border-color:#bbf7d0}.note{margin-top:10px;border-radius:14px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;padding:10px;font-weight:850;font-size:11px}.note.warn{background:#fff7ed;border-color:#fed7aa;color:#9a3412}.note.danger{background:#fef2f2;border-color:#fecaca;color:#991b1b}.repeat-list{display:grid;gap:9px;margin-top:10px}.repeat-row{border:1px dashed #cbd5e1;background:#fbfdff;border-radius:16px;padding:12px}.repeat-head{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--blue);font-weight:1000;margin-bottom:10px}.mini-btn{border:0;border-radius:12px;background:#eef2f7;color:var(--blue);font-weight:1000;padding:9px 11px;cursor:pointer;font-size:11px}.mini-btn.primary{background:#fff2e6;color:#9a4a00}.mini-btn.danger{background:#fee2e2;color:#991b1b}.stock-card{background:#fbfdff;border:1px solid var(--line);border-radius:18px;padding:13px}.stock-card h3{margin:0 0 10px;color:var(--blue);font-size:15px}.stock-total{background:#eef2f7;border:1px solid #d9e2ec;border-radius:14px;padding:10px;color:#475569;font-weight:1000}.stock-total span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.35px;color:#64748b}.stock-total strong{display:block;margin-top:4px;color:var(--blue);font-size:16px}.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.scale label{cursor:pointer}.scale input{display:none}.scale span{display:grid;place-items:center;border:1.3px solid var(--line);border-radius:13px;background:#fff;color:var(--blue);font-size:13px;font-weight:1000;min-height:40px}.scale input:checked+span{border-color:var(--orange);background:#fff2e6;color:#9a4a00}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.summary-item{background:#fff;border:1px solid var(--line);border-radius:18px;padding:13px;box-shadow:var(--shadow)}.summary-item span{display:block;color:var(--muted);font-size:10px;font-weight:1000;text-transform:uppercase;letter-spacing:.35px}.summary-item strong{display:block;margin-top:5px;color:var(--blue);font-size:20px}.bottom{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}.bottom-inner{max-width:1220px;margin:auto;display:flex;gap:9px}.btn{border:0;border-radius:15px;padding:13px 14px;font-size:13px;font-weight:1000;cursor:pointer}.btn-light{background:#eef2f7;color:var(--blue);flex:1}.btn-primary{background:linear-gradient(135deg,var(--orange),var(--orange2));color:#fff;flex:2}.toast{position:fixed;right:16px;bottom:86px;background:#071528;color:#fff;padding:12px 14px;border-radius:14px;box-shadow:var(--shadow);font-weight:900;display:none;z-index:50}.toast.show{display:block}.hero-meta{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.hero-meta strong{font-size:19px}.hero-meta span{display:block;color:#cbd5e1;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.35px}.calc-field input{background:#eef2f7;color:#102a56}.sub-card{border:1px solid var(--line);background:#fbfdff;border-radius:18px;padding:14px}.sub-title{margin:0 0 10px;color:var(--blue);font-size:15px;font-weight:1000}.soft-separator{height:1px;background:var(--line);margin:16px 0}.disabled-info{opacity:.72}@media(max-width:980px){.controls,.grid-4,.summary{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:1fr 1fr}.competition{grid-template-columns:1fr}}@media(max-width:620px){.brand{align-items:flex-start}.brand,.brand-left{flex-direction:column}.controls,.grid-4,.grid-3,.grid-2,.summary{grid-template-columns:1fr}.title h1{font-size:21px}.app{padding-left:10px;padding-right:10px}.block{padding:13px}.scale{grid-template-columns:repeat(5,1fr)}}
-</style>
-</head>
-<body>
-<div class="app">
-  <section class="hero">
-    <div class="hero-content">
-      <div class="hero-meta">
-        <div><span>Restaurant en cours</span><strong id="heroRestaurant">-</strong></div>
-        <div><span>Date du service</span><strong id="heroDate">-</strong></div>
-      </div>
-      <div class="progress-wrap"><div class="progress" id="progress"></div></div>
-      <div class="progress-text" id="progressText">Renseigne les informations communes pour afficher le formulaire.</div>
-    </div>
-  </section>
 
-  <section class="panel">
-    <div class="block-head"><div><h2 class="block-title">Informations communes</h2><div class="block-help">Ces informations déclenchent l'affichage du rapport Matin ou Soir.</div></div><span class="badge orange">Obligatoire</span></div>
-    <div class="controls">
-      <div class="field"><label>Date du service *</label><input type="date" id="dateService" required></div>
-      <div class="field"><label>Restaurant *</label><select id="restaurant" required><option value="">Choisir le restaurant</option><option value="boulogne">Boulogne-sur-Mer</option><option value="armentieres">Armentières</option></select></div>
-      <div class="field"><label>Nom du responsable *</label><select id="responsable" required disabled><option value="">Choisir d'abord le restaurant</option></select></div>
-      <div class="field"><label>Service *</label><select id="service" required><option value="">Choisir le service</option><option value="matin">Matin</option><option value="soir">Soir</option></select></div>
-    </div>
-    <div class="note" id="gateNote">La date n'est pas préremplie volontairement : le responsable doit choisir la date du service.</div>
-  </section>
+function enregistrerDansSheet(data) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME) || ss.insertSheet(SHEET_NAME);
 
-  <div id="locked" class="section-gate">Le rapport s'affichera dès que la date, le restaurant, le responsable et le service seront renseignés.</div>
+  creerEntetesSiBesoin(sheet);
 
-  <div id="mainForm" class="hidden">
-    <div class="summary">
-      <div class="summary-item"><span>CA global service</span><strong id="sumCA">0,00 €</strong></div>
-      <div class="summary-item"><span>Commandes globales</span><strong id="sumCmd">0</strong></div>
-      <div class="summary-item"><span>Ticket moyen global</span><strong id="sumTicketMoyen">0,00 €</strong></div>
-      <div class="summary-item"><span>Erreurs + pertes</span><strong id="sumPertes">0,00 €</strong></div>
-    </div>
+  const service = normalize(data.service);
+  const prev = getPrevisionnel(data);
 
-    <form id="form" novalidate>
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — activité commerciale</h2><div class="block-help">CA réalisé, volume de commandes et canaux de vente.</div></div><span class="badge ok">CA</span></div>
-        <div class="grid-4">
-          <div class="field"><label>CA global réalisé *</label><input type="number" step="0.01" min="0" id="caTotal" placeholder="CA toutes plateformes"></div>
-          <div class="field"><label>Nombre global de commandes *</label><input type="number" step="1" min="0" id="cmdTotal" placeholder="Commandes toutes plateformes"></div>
-          <div class="field"><label>CA boissons *</label><input type="number" step="0.01" min="0" id="caBoissons" placeholder="CA boissons"></div>
-          <div class="field"><label>Quantité boissons vendues *</label><input type="number" step="1" min="0" id="qteBoissons" placeholder="Nombre vendu"></div>
-          <div class="field"><label>CA desserts *</label><input type="number" step="0.01" min="0" id="caDesserts" placeholder="CA desserts"></div>
-          <div class="field"><label>Quantité desserts vendus *</label><input type="number" step="1" min="0" id="qteDesserts" placeholder="Nombre vendu"></div>
-          <div class="field"><label>CA Uber Eats</label><input type="number" step="0.01" min="0" id="caUber"></div>
-          <div class="field"><label>Commandes Uber Eats</label><input type="number" step="1" min="0" id="cmdUber"></div>
-          <div class="field"><label>CA Deliveroo</label><input type="number" step="0.01" min="0" id="caDeliveroo"></div>
-          <div class="field"><label>Commandes Deliveroo</label><input type="number" step="1" min="0" id="cmdDeliveroo"></div>
-          <div class="field"><label>CA Click & Collect</label><input type="number" step="0.01" min="0" id="caCC"></div>
-          <div class="field"><label>Commandes C&C</label><input type="number" step="1" min="0" id="cmdCC"></div>
-          <div class="field calc-field"><label>CA Bornes & caisse calculé</label><input id="caBornes" readonly></div>
-          <div class="field calc-field"><label>Commandes Bornes & caisse calculées</label><input id="cmdBornes" readonly></div>
-        </div>
-        <div class="note">Le CA Bornes & caisse est calculé automatiquement : CA global - Uber Eats - Deliveroo - Click & Collect. Même principe pour les commandes. Le CA boissons et desserts sont des indicateurs complémentaires inclus dans l’envoi Google Sheets.</div>
-      </section>
+  const caTotal = n(data.caRestaurant);
+  const caUber = n(data.caUber);
+  const caDeliveroo = n(data.caDeliveroo);
+  const caCC = n(data.caCC);
+  const caComptoir = caTotal - caUber - caDeliveroo - caCC;
 
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — réductions & commandes refaites</h2><div class="block-help">Saisie dynamique : plusieurs commandes possibles.</div></div><span class="badge">Gestion client</span></div>
-        <div class="grid-2">
-          <div class="field"><label>Réduction appliquée aux clients ?</label><select id="hasReductions"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
-          <div class="field"><label>Commande refaite à un client ?</label><select id="hasRefaits"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
-        </div>
-        <div id="redWrap" class="hidden"><div class="block-head" style="margin-top:12px;margin-bottom:0"><h2 class="block-title">Réductions</h2><button type="button" class="mini-btn primary" onclick="addReduction()">+ Ajouter une commande</button></div><div class="repeat-list" id="redList"></div></div>
-        <div id="refaitWrap" class="hidden"><div class="block-head" style="margin-top:12px;margin-bottom:0"><h2 class="block-title">Commandes refaites</h2><button type="button" class="mini-btn primary" onclick="addRefait()">+ Ajouter une commande</button></div><div class="repeat-list" id="refaitList"></div></div>
-      </section>
+  const cmdComptoir = n(data.cmdRestaurant);
+  const cmdUber = n(data.cmdUber);
+  const cmdDeliveroo = n(data.cmdDeliveroo);
+  const cmdCC = n(data.cmdCC);
+  const commandesTotal = cmdComptoir + cmdUber + cmdDeliveroo + cmdCC;
 
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — pertes du service</h2><div class="block-help">Suivi des erreurs, pertes et montant total calculé automatiquement.</div></div><span class="badge orange">Pertes</span></div>
-        <div class="grid-4">
-          <div class="field"><label>Nombre d'erreurs</label><input type="number" step="1" min="0" id="nbErreurs"></div>
-          <div class="field"><label>Montant des erreurs</label><input type="number" step="0.01" min="0" id="montantErreurs"></div>
-          <div class="field"><label>Montant des pertes</label><input type="number" step="0.01" min="0" id="montantPertes"></div>
-          <div class="field calc-field"><label>Total erreurs + pertes</label><input id="totalPertesService" readonly></div>
-        </div>
-      </section>
+  const ticketMoyen = commandesTotal > 0 ? caTotal / commandesTotal : 0;
+  const ticketMoyenComptoir = cmdComptoir > 0 ? caComptoir / cmdComptoir : 0;
+  const ticketMoyenUber = cmdUber > 0 ? caUber / cmdUber : 0;
+  const ticketMoyenDeliveroo = cmdDeliveroo > 0 ? caDeliveroo / cmdDeliveroo : 0;
+  const ticketMoyenCC = cmdCC > 0 ? caCC / cmdCC : 0;
 
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — RH & organisation du rush</h2><div class="block-help">Les listes équipiers sont prêtes à être connectées à Google Sheets via Apps Script.</div></div><span class="badge orange">RH</span></div>
-        <div class="grid-2">
-          <div class="sub-card">
-            <h3 class="sub-title">Planning & heures supplémentaires</h3>
-            <div class="grid-3">
-              <div class="field"><label>Heures prévues dans le planning *</label><input type="number" step="0.01" min="0" id="heuresPrevuesPlanning" placeholder="Ex : 18,50"></div>
-              <div class="field calc-field"><label>Heures réelles calculées</label><input id="heuresReellesCalc" readonly></div>
-              <div class="field"><label>Heures supplémentaires rajoutées ?</label><select id="hasHeuresSupp"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
-            </div>
-            <div id="hsWrap" class="hidden"><div class="block-head" style="margin-top:12px;margin-bottom:0"><h2 class="block-title">Équipiers avec heures supplémentaires</h2><button type="button" class="mini-btn primary" onclick="addHeureSupp()">+ Ajouter un équipier</button></div><div class="repeat-list" id="hsList"></div></div>
-          </div>
-          <div class="sub-card">
-            <h3 class="sub-title">Temps d'attente</h3>
-            <div class="field"><label>Temps d'attente le plus élevé du service *</label><input type="number" step="1" min="0" id="tempsAttente" placeholder="Minutes"></div>
-            <div class="field hidden" id="expAttenteWrap" style="margin-top:10px"><label>Explication obligatoire si temps d'attente &gt; 10 min</label><textarea id="expAttente" placeholder="Cause du temps d'attente et action corrective."></textarea></div>
-          </div>
-        </div>
-        <div class="soft-separator"></div>
-        <div class="grid-3">
-          <div class="field"><label>Salarié aux fritures</label><select class="employeeSelect" id="placeFriture"></select></div>
-          <div class="field"><label>Salarié à l'envoi</label><select class="employeeSelect" id="placeEnvoi"></select></div>
-          <div class="field"><label>Salarié au pliage</label><select class="employeeSelect" id="placePliage"></select></div>
-          <div class="field"><label>Salarié au toaster</label><select class="employeeSelect" id="placeToaster"></select></div>
-          <div class="field"><label>Salarié à la caisse</label><select class="employeeSelect" id="placeCaisse"></select></div>
-        </div>
-      </section>
+  const caBoissons = n(data.venteBoisson);
+  const caDesserts = n(data.venteDessert);
+  const caComplementaire = caBoissons + caDesserts;
 
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — stock initial de la journée</h2><div class="block-help">Quantité en kg, sachets, cartons et livraison éventuelle.</div></div><span class="badge">Stock initial</span></div>
-        <div class="grid-3" id="stockGrid"></div>
-        <div class="grid-3" id="stockTotals" style="margin-top:12px"></div>
-      </section>
+  const pertes = n(data.pertes);
+  const reduction = n(data.montantReduction);
+  const ecartCaisse = n(data.ecartCaisse);
+  const caNet = caTotal - pertes - reduction;
 
-      <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Matin — appréciation du service</h2><div class="block-help">Note sur 5. Si la note est inférieure à 4, une explication est demandée.</div></div><span class="badge ok">Évaluation</span></div>
-        <div class="grid-3">
-          <div class="field"><label>Fluidité du rush *</label><div class="scale" data-scale="fluidite"></div></div>
-          <div class="field"><label>Qualité de la prépa de service *</label><div class="scale" data-scale="qualite"></div></div>
-          <div class="field"><label>Satisfaction client *</label><div class="scale" data-scale="satisfaction"></div></div>
-          <div class="field"><label>Évaluation du placement *</label><div class="scale" data-scale="placement"></div></div>
-          <div class="field"><label>Motivation de l'équipe *</label><div class="scale" data-scale="motivation"></div></div>
-          <div class="field"><label>Récupération de service *</label><div class="scale" data-scale="recuperation"></div></div>
-        </div>
-        <div class="grid-3" style="margin-top:10px">
-          <div class="field hidden" id="expFluiditeWrap"><label>Explication fluidité si note &lt; 4</label><textarea id="expFluidite"></textarea></div>
-          <div class="field hidden" id="expQualiteWrap"><label>Explication qualité si note &lt; 4</label><textarea id="expQualite"></textarea></div>
-          <div class="field hidden" id="expSatisfactionWrap"><label>Explication satisfaction si note &lt; 4</label><textarea id="expSatisfaction"></textarea></div>
-          <div class="field hidden" id="expPlacementWrap"><label>Explication placement si note &lt; 4</label><textarea id="expPlacement"></textarea></div>
-          <div class="field hidden" id="expMotivationWrap"><label>Explication motivation si note &lt; 4</label><textarea id="expMotivation"></textarea></div>
-          <div class="field hidden" id="expRecuperationWrap"><label>Explication récupération de service si note &lt; 4</label><textarea id="expRecuperation"></textarea></div>
-        </div>
-        <div class="grid-2" style="margin-top:10px">
-          <div class="field"><label>Point fort du service</label><textarea id="pointFort" placeholder="Ce qui a bien fonctionné pendant le service."></textarea></div>
-          <div class="field"><label>Points à améliorer pour le prochain service</label><textarea id="amelioration" placeholder="Action concrète à prévoir au prochain service."></textarea></div>
-        </div>
-      </section>
+  const stockFritesKg = calculerStockFritesKg(data);
 
-      <section class="block report report-soir hidden disabled-info">
-        <div class="block-head"><div><h2 class="block-title">Soir — à construire en version 2</h2><div class="block-help">La partie soir sera ajoutée après validation de la structure Matin.</div></div><span class="badge orange">Prochaine étape</span></div>
-        <div class="note warn">Tu as demandé de finaliser le Matin d'abord. Cette zone est volontairement réservée pour la suite.</div>
-      </section>
-    </form>
-  </div>
-</div>
+  let frites = emptyFrites();
 
-<div class="bottom"><div class="bottom-inner"><button class="btn btn-light" type="button" onclick="resetForm()">Réinitialiser</button><button class="btn btn-light" type="button" onclick="saveLocal()">Enregistrer brouillon</button><button class="btn btn-primary" type="button" onclick="validateReport()">Valider le rapport</button></div></div>
-<div class="toast" id="toast"></div>
+  if (!service.includes("matin")) {
+    frites = calculerFrites(data, caTotal);
+  }
 
-<script>
-const APPS_SCRIPT_URL='';
-const $=id=>document.getElementById(id);const qsa=s=>[...document.querySelectorAll(s)];
-const responsables={boulogne:['Imane','Guillaume','Pape','Omar'],armentieres:['Imane','Anouar','Babacar','Omar']};
-const employeesFallback={boulogne:['Imane','Guillaume','Pape','Omar','Équipier 1','Équipier 2','Équipier 3'],armentieres:['Imane','Anouar','Babacar','Omar','Équipier 1','Équipier 2','Équipier 3']};
-let employees={...employeesFallback};
-const stockProducts=[{id:'frites',label:'Frites',cartonKg:10},{id:'viande',label:'Viande hachée',cartonKg:10},{id:'merguez',label:'Merguez',cartonKg:5}];
-let reductions=[],refaits=[],heuresSupp=[];
-function money(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{style:'currency',currency:'EUR'})}function num(id){return parseFloat(($(id)?.value||'').replace(',','.'))||0}function val(id){return ($(id)?.value||'').trim()}function restoLabel(){return val('restaurant')==='boulogne'?'Boulogne-sur-Mer':val('restaurant')==='armentieres'?'Armentières':'-'}
-function showToast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2600)}
-function parseTimeMinutes(value){const raw=String(value||'').trim().toLowerCase();if(!raw)return null;let h=null,m=null;let match=raw.match(/^(\d{1,2})\s*(?:h|:|\.)\s*(\d{0,2})/);if(match){h=parseInt(match[1],10);m=match[2]===''?0:parseInt(match[2],10)}else{const digits=raw.replace(/\D/g,'');if(digits.length===4){h=parseInt(digits.slice(0,2),10);m=parseInt(digits.slice(2),10)}else if(digits.length===3){h=parseInt(digits.slice(0,1),10);m=parseInt(digits.slice(1),10)}else if(digits.length===1||digits.length===2){h=parseInt(digits,10);m=0}}if(h===null||m===null||Number.isNaN(h)||Number.isNaN(m))return null;if(h<0||h>23||m<0||m>59)return null;return h*60+m}
-function cleanTime(value){const mins=parseTimeMinutes(value);if(mins===null)return String(value||'').trim();const h=Math.floor(mins/60),m=mins%60;return String(h).padStart(2,'0')+'H'+String(m).padStart(2,'0')+'min'}
-function diffHours(start,end){const s=parseTimeMinutes(start),e=parseTimeMinutes(end);if(s===null||e===null)return 0;let mins=e-s;if(mins<0)mins+=24*60;return Math.round((mins/60)*100)/100}
-function caBornesCalc(){return Math.max(0,num('caTotal')-num('caUber')-num('caDeliveroo')-num('caCC'))}
-function cmdBornesCalc(){return Math.max(0,num('cmdTotal')-num('cmdUber')-num('cmdDeliveroo')-num('cmdCC'))}
-function pertesTotalCalc(){return num('montantErreurs')+num('montantPertes')}
-function buildScale(name){return [1,2,3,4,5].map(v=>`<label><input type="radio" name="${name}" value="${v}"><span>${v}</span></label>`).join('')}function scaleVal(name){return document.querySelector(`input[name="${name}"]:checked`)?.value||''}
-function optionList(list,placeholder='Choisir'){return `<option value="">${placeholder}</option>`+list.map(x=>`<option>${x}</option>`).join('')}
-function updateResponsables(){const r=val('restaurant');$('responsable').disabled=!r;$('responsable').innerHTML=r?optionList(responsables[r],'Choisir le responsable'):'<option value="">Choisir d’abord le restaurant</option>';updateEmployeeSelects();refresh()}
-function updateEmployeeSelects(){const r=val('restaurant');const list=r?(employees[r]||employeesFallback[r]):[];qsa('.employeeSelect').forEach(s=>s.innerHTML=optionList(list,'Choisir un salarié'));renderHeuresSupp()}
-function commonComplete(){return !!(val('dateService')&&val('restaurant')&&val('responsable')&&val('service'))}
-function handleGate(){const ok=commonComplete();$('locked').classList.toggle('hidden',ok);$('mainForm').classList.toggle('hidden',!ok);$('gateNote').textContent=ok?`Rapport ${val('service')==='matin'?'Matin':'Soir'} ouvert pour ${restoLabel()}.`:'La date n’est pas préremplie volontairement : le responsable doit choisir la date du service.';qsa('.report-matin').forEach(el=>el.classList.toggle('hidden',val('service')!=='matin'));qsa('.report-soir').forEach(el=>el.classList.toggle('hidden',val('service')!=='soir'))}
-function renderRepeats(){
-  $('redWrap').classList.toggle('hidden',val('hasReductions')!=='Oui');
-  $('refaitWrap').classList.toggle('hidden',val('hasRefaits')!=='Oui');
-  $('hsWrap').classList.toggle('hidden',val('hasHeuresSupp')!=='Oui');
-  $('redList').innerHTML=reductions.length?reductions.map((r,i)=>`<div class="repeat-row"><div class="repeat-head">Réduction #${i+1}<button type="button" class="mini-btn danger" onclick="removeReduction(${i})">Supprimer</button></div><div class="grid-3"><div class="field"><label>N° commande</label><input data-red="${i}:numero" value="${r.numero||''}"></div><div class="field"><label>Montant réduction</label><input type="number" step="0.01" min="0" data-red="${i}:montant" value="${r.montant||''}"></div><div class="field"><label>Explication</label><textarea data-red="${i}:explication">${r.explication||''}</textarea></div></div></div>`).join(''):'<div class="note">Aucune ligne. Clique sur “Ajouter une commande”.</div>';
-  $('refaitList').innerHTML=refaits.length?refaits.map((r,i)=>`<div class="repeat-row"><div class="repeat-head">Commande refaite #${i+1}<button type="button" class="mini-btn danger" onclick="removeRefait(${i})">Supprimer</button></div><div class="grid-4"><div class="field"><label>N° de la commande</label><input data-refait="${i}:numero" value="${r.numero||''}"></div><div class="field"><label>Article refait / toute la commande</label><input data-refait="${i}:article" value="${r.article||''}" placeholder="Ex : tacos M / toute la commande"></div><div class="field"><label>Montant</label><input type="number" step="0.01" min="0" data-refait="${i}:montant" value="${r.montant||''}"></div><div class="field"><label>Explication</label><textarea data-refait="${i}:explication">${r.explication||''}</textarea></div></div></div>`).join(''):'<div class="note">Aucune ligne. Clique sur “Ajouter une commande”.</div>';
-  qsa('[data-red]').forEach(el=>el.addEventListener('input',()=>{const [i,k]=el.dataset.red.split(':');reductions[i][k]=el.value;refresh()}));
-  qsa('[data-refait]').forEach(el=>el.addEventListener('input',()=>{const [i,k]=el.dataset.refait.split(':');refaits[i][k]=el.value;refresh()}));
-  renderHeuresSupp();
+  sheet.appendRow([
+    new Date(),
+    data.dateReporting || "",
+    data.restaurant || "",
+    data.responsable || "",
+    data.skelloStatus || "",
+    data.service || "",
+
+    n(data.dosesVH),
+    n(data.dosesMerguez),
+    n(data.heuresReellesSkello),
+    n(data.heuresSupp),
+    n(data.heuresTravailTheorique),
+
+    caTotal,
+    prev.caTotalPrevu,
+    caTotal - prev.caTotalPrevu,
+    pctEcart(caTotal, prev.caTotalPrevu),
+
+    caComptoir,
+    prev.caRestaurantPrevu,
+    caComptoir - prev.caRestaurantPrevu,
+    pctEcart(caComptoir, prev.caRestaurantPrevu),
+    ratio(caComptoir, caTotal),
+    cmdComptoir,
+    ticketMoyenComptoir,
+
+    caUber,
+    prev.caUberPrevu,
+    caUber - prev.caUberPrevu,
+    pctEcart(caUber, prev.caUberPrevu),
+    ratio(caUber, caTotal),
+    cmdUber,
+    ticketMoyenUber,
+
+    caDeliveroo,
+    prev.caDeliverooPrevu,
+    caDeliveroo - prev.caDeliverooPrevu,
+    pctEcart(caDeliveroo, prev.caDeliverooPrevu),
+    ratio(caDeliveroo, caTotal),
+    cmdDeliveroo,
+    ticketMoyenDeliveroo,
+
+    caCC,
+    prev.caCCPrevu,
+    caCC - prev.caCCPrevu,
+    pctEcart(caCC, prev.caCCPrevu),
+    ratio(caCC, caTotal),
+    cmdCC,
+    ticketMoyenCC,
+
+    commandesTotal,
+    ticketMoyen,
+
+    prev.masseSalarialePrevue,
+    ratio(prev.masseSalarialePrevue, caTotal),
+
+    pertes,
+    prev.pertesPrevues,
+    pertes - prev.pertesPrevues,
+    pctEcart(pertes, prev.pertesPrevues),
+    ratio(pertes, caTotal),
+
+    caBoissons,
+    ratio(caBoissons, caTotal),
+    caDesserts,
+    ratio(caDesserts, caTotal),
+    caComplementaire,
+    ratio(caComplementaire, caTotal),
+
+    n(data.fritesCarton),
+    n(data.fritesSachet),
+    n(data.fritesKg),
+    stockFritesKg,
+    data.fritesLivraison || "",
+    n(data.fritesColis),
+
+    frites.stockMatinKg,
+    frites.livraisonKg,
+    frites.stockSoirKg,
+    frites.consoKg,
+    frites.consoEuro,
+    frites.consoPctCA,
+    frites.objectifPctCA,
+    frites.ecartPct,
+    frites.ecartKg,
+    frites.statut,
+
+    data.merguezCheck || "",
+    n(data.merguezCarton),
+    n(data.merguezSachet),
+    n(data.merguezKg),
+    data.merguezLivraison || "",
+    n(data.merguezColis),
+
+    data.pouletCheck || "",
+    n(data.pouletCarton),
+    n(data.pouletSachet),
+    n(data.pouletKg),
+    data.pouletLivraison || "",
+    n(data.pouletColis),
+
+    data.rushFriture || "",
+    data.rushEnvoie || "",
+    data.rushPliage || "",
+    data.rushToaster || "",
+    data.rushCaisse || "",
+
+    data.repasEmploye || "",
+    n(data.nbRepas),
+
+    data.reduction || "",
+    reduction,
+    ratio(reduction, caTotal),
+    data.descReduction || "",
+
+    ecartCaisse,
+    ratio(ecartCaisse, caTotal),
+
+    caNet,
+    ratio(caNet, caTotal),
+
+    data.descPertes || "",
+    data.appreciation || ""
+  ]);
 }
-function renderHeuresSupp(){const r=val('restaurant');const list=r?(employees[r]||employeesFallback[r]):[];$('hsList').innerHTML=heuresSupp.length?heuresSupp.map((h,i)=>{const duree=diffHours(h.debut,h.fin);heuresSupp[i].heures=duree;return `<div class="repeat-row"><div class="repeat-head">Heures supp #${i+1}<button type="button" class="mini-btn danger" onclick="removeHeureSupp(${i})">Supprimer</button></div><div class="grid-4"><div class="field"><label>Équipier</label><select data-hs="${i}:nom">${optionList(list,'Choisir équipier')}</select></div><div class="field"><label>Début</label><input data-hs="${i}:debut" inputmode="text" placeholder="Ex : 18H05min" value="${h.debut||''}"></div><div class="field"><label>Fin</label><input data-hs="${i}:fin" inputmode="text" placeholder="Ex : 20H30min" value="${h.fin||''}"></div><div class="field calc-field"><label>Durée calculée</label><input readonly value="${duree?duree.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' h':''}"></div><div class="field" style="grid-column:1/-1"><label>Motif</label><textarea data-hs="${i}:motif">${h.motif||''}</textarea></div></div></div>`}).join(''):'<div class="note">Aucun équipier ajouté.</div>';qsa('[data-hs]').forEach(el=>{const [i,k]=el.dataset.hs.split(':');if(k==='nom')el.value=heuresSupp[i].nom||'';el.addEventListener('input',()=>{heuresSupp[i][k]=el.value;refresh()});el.addEventListener('change',()=>{heuresSupp[i][k]=(k==='debut'||k==='fin')?cleanTime(el.value):el.value;renderHeuresSupp();refresh()});el.addEventListener('blur',()=>{if(k==='debut'||k==='fin'){heuresSupp[i][k]=cleanTime(el.value);renderHeuresSupp();refresh()}})})}
-function addReduction(){reductions.push({numero:'',montant:'',explication:''});renderRepeats();refresh()}function removeReduction(i){reductions.splice(i,1);renderRepeats();refresh()}function addRefait(){refaits.push({numero:'',article:'',montant:'',explication:''});renderRepeats();refresh()}function removeRefait(i){refaits.splice(i,1);renderRepeats();refresh()}function addHeureSupp(){heuresSupp.push({nom:'',debut:'',fin:'',heures:0,motif:''});renderHeuresSupp();refresh()}function removeHeureSupp(i){heuresSupp.splice(i,1);renderHeuresSupp();refresh()}
-function buildStocks(){
-  $('stockGrid').innerHTML=stockProducts.map(p=>`<div class="stock-card"><h3>${p.label}</h3><div class="grid-2"><div class="field"><label>Qté en KG</label><input type="number" step="0.01" min="0" id="stock_${p.id}_kg"></div><div class="field"><label>Nombre sachets 2,5 kg</label><input type="number" step="0.5" min="0" id="stock_${p.id}_sachets"></div><div class="field"><label>Nombre cartons (${p.cartonKg} kg/carton)</label><input type="number" step="0.5" min="0" id="stock_${p.id}_cartons"></div><div class="field"><label>Livraison ?</label><select id="stock_${p.id}_livraison"><option>Non</option><option>Oui</option></select></div><div class="field hidden" id="wrap_stock_${p.id}_livraisonCartons"><label>Qté livraison en cartons</label><input type="number" step="0.5" min="0" id="stock_${p.id}_livraisonCartons"></div></div></div>`).join('');
-  $('stockTotals').innerHTML=stockProducts.map(p=>`<div class="stock-total"><span>Total informatif ${p.label}</span><strong id="total_${p.id}">0,00 kg</strong></div>`).join('')
+
+function creerEntetesSiBesoin(sheet) {
+  if (sheet.getLastRow() > 0) return;
+
+  sheet.appendRow([
+    "Horodatage",
+    "Date reporting",
+    "Restaurant",
+    "Responsable",
+    "Type de rapport",
+    "Service",
+
+    "Doses VH",
+    "Doses Merguez",
+    "Heures réelles Skello",
+    "Heures supp",
+    "Heures travail théorique",
+
+    "CA Total Réel",
+    "CA Total Prévu",
+    "Écart CA Total",
+    "% Écart CA Total",
+
+    "CA Comptoir Réel",
+    "CA Comptoir Prévu",
+    "Écart CA Comptoir",
+    "% Écart CA Comptoir",
+    "% CA Comptoir",
+    "Commandes Comptoir",
+    "Ticket Moyen Comptoir",
+
+    "CA Uber Réel",
+    "CA Uber Prévu",
+    "Écart CA Uber",
+    "% Écart CA Uber",
+    "% CA Uber",
+    "Commandes Uber",
+    "Ticket Moyen Uber",
+
+    "CA Deliveroo Réel",
+    "CA Deliveroo Prévu",
+    "Écart CA Deliveroo",
+    "% Écart CA Deliveroo",
+    "% CA Deliveroo",
+    "Commandes Deliveroo",
+    "Ticket Moyen Deliveroo",
+
+    "CA C&C Réel",
+    "CA C&C Prévu",
+    "Écart CA C&C",
+    "% Écart CA C&C",
+    "% CA C&C",
+    "Commandes C&C",
+    "Ticket Moyen C&C",
+
+    "Commandes Total",
+    "Ticket Moyen Global",
+
+    "Masse Salariale Prévue",
+    "Ratio Masse Salariale Prévue / CA",
+
+    "Pertes Réelles",
+    "Pertes Prévues",
+    "Écart Pertes",
+    "% Écart Pertes",
+    "Taux Pertes / CA",
+
+    "CA Boissons",
+    "% CA Boissons",
+    "CA Desserts",
+    "% CA Desserts",
+    "CA Complémentaire",
+    "% CA Complémentaire",
+
+    "Frites Cartons",
+    "Frites Sachets",
+    "Frites Kg",
+    "Stock Frites Kg",
+    "Frites Livraison",
+    "Frites Colis",
+
+    "Stock Frites Matin Kg",
+    "Livraison Frites Kg",
+    "Stock Frites Soir Kg",
+    "Conso Réelle Frites Kg",
+    "Conso Réelle Frites €",
+    "% Conso Réelle Frites / CA",
+    "Objectif Frites % CA",
+    "Écart Frites %",
+    "Écart Frites Kg",
+    "Statut Frites",
+
+    "Merguez Statut",
+    "Merguez Cartons",
+    "Merguez Sachets",
+    "Merguez Kg",
+    "Merguez Livraison",
+    "Merguez Colis",
+
+    "Poulet Statut",
+    "Poulet Cartons",
+    "Poulet Sachets",
+    "Poulet Kg",
+    "Poulet Livraison",
+    "Poulet Colis",
+
+    "Rush Friture",
+    "Rush Envoie",
+    "Rush Pliage",
+    "Rush Toaster",
+    "Rush Caisse",
+
+    "Repas Employés",
+    "Nombre Repas",
+
+    "Réduction",
+    "Montant Réduction",
+    "Taux Réduction / CA",
+    "Description Réduction",
+
+    "Écart Caisse",
+    "Taux Écart Caisse / CA",
+
+    "CA Net",
+    "CA Net / CA",
+
+    "Description Pertes",
+    "Appréciation"
+  ]);
+
+  sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight("bold");
+  sheet.setFrozenRows(1);
 }
-function stockTotalKg(p){return num(`stock_${p.id}_kg`)+(num(`stock_${p.id}_sachets`)*2.5)+(num(`stock_${p.id}_cartons`)*p.cartonKg)+(val(`stock_${p.id}_livraison`)==='Oui'?num(`stock_${p.id}_livraisonCartons`)*p.cartonKg:0)}
-function heuresSuppTotal(){return heuresSupp.reduce((t,h)=>t+diffHours(h.debut,h.fin),0)}
-function heuresReellesCalc(){return num('heuresPrevuesPlanning')+(val('hasHeuresSupp')==='Oui'?heuresSuppTotal():0)}
-function conditionals(){stockProducts.forEach(p=>{$(`wrap_stock_${p.id}_livraisonCartons`).classList.toggle('hidden',val(`stock_${p.id}_livraison`)!=='Oui')});[['fluidite','expFluiditeWrap'],['qualite','expQualiteWrap'],['satisfaction','expSatisfactionWrap'],['placement','expPlacementWrap'],['motivation','expMotivationWrap'],['recuperation','expRecuperationWrap']].forEach(([s,w])=>$(w).classList.toggle('hidden',!(parseInt(scaleVal(s))>0&&parseInt(scaleVal(s))<4)));$('expAttenteWrap').classList.toggle('hidden',!(num('tempsAttente')>10))}
-function refresh(){handleGate();stockProducts.forEach(p=>{$(`total_${p.id}`).textContent=stockTotalKg(p).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg'});const ca=num('caTotal'),cmd=num('cmdTotal'),ticket=cmd?ca/cmd:0,bCA=caBornesCalc(),bCmd=cmdBornesCalc(),pertes=pertesTotalCalc(),hReel=heuresReellesCalc();$('caBornes').value=money(bCA);$('cmdBornes').value=bCmd;$('totalPertesService').value=money(pertes);$('heuresReellesCalc').value=hReel?hReel.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' h':'';$('sumCA').textContent=money(ca);$('sumCmd').textContent=cmd;$('sumTicketMoyen').textContent=money(ticket);$('sumPertes').textContent=money(pertes);$('heroRestaurant').textContent=commonComplete()?restoLabel():'-';$('heroDate').textContent=val('dateService')||'-';const p=completion();$('progress').style.width=p+'%';$('progressText').textContent=commonComplete()?`${p}% complété · ${restoLabel()} · ${val('dateService')} · Service ${val('service')}`:'Renseigne les informations communes pour afficher le formulaire.';conditionals()}
-function completion(){if(!commonComplete())return 0;let req=['dateService','restaurant','responsable','service'];if(val('service')==='matin'){req.push('caTotal','cmdTotal','caBoissons','qteBoissons','caDesserts','qteDesserts','caUber','cmdUber','caDeliveroo','cmdDeliveroo','caCC','cmdCC','hasReductions','hasRefaits','nbErreurs','montantErreurs','montantPertes','heuresPrevuesPlanning','hasHeuresSupp','tempsAttente','placeFriture','placeEnvoi','placePliage','placeToaster','placeCaisse','pointFort','amelioration');stockProducts.forEach(p=>{req.push(`stock_${p.id}_kg`,`stock_${p.id}_sachets`,`stock_${p.id}_cartons`,`stock_${p.id}_livraison`);if(val(`stock_${p.id}_livraison`)==='Oui')req.push(`stock_${p.id}_livraisonCartons`)});['fluidite','qualite','satisfaction','placement','motivation','recuperation'].forEach(s=>req.push(s));if(num('tempsAttente')>10)req.push('expAttente');['fluidite','qualite','satisfaction','placement','motivation','recuperation'].forEach(s=>{if(parseInt(scaleVal(s))<4)req.push('exp'+s.charAt(0).toUpperCase()+s.slice(1))})}let ok=0;req.forEach(id=>{if(['fluidite','qualite','satisfaction','placement','motivation','recuperation'].includes(id)){if(scaleVal(id))ok++}else if(val(id)||num(id)>0)ok++});return Math.round(ok/req.length*100)}
-function indiceService(){const notes=['fluidite','qualite','satisfaction','placement','motivation','recuperation'].map(scaleVal).filter(Boolean).map(Number);return notes.length?Math.round((notes.reduce((a,b)=>a+b,0)/notes.length)*100)/100:0}
-function collect(){const bCA=caBornesCalc(),bCmd=cmdBornesCalc(),pertesTotal=pertesTotalCalc(),ca=num('caTotal'),cmd=num('cmdTotal'),ticketMoyen=cmd?Math.round((ca/cmd)*100)/100:0,hSuppTotal=heuresSuppTotal(),hReelles=heuresReellesCalc();const meta={dateService:val('dateService'),restaurant:restoLabel(),restaurantCode:val('restaurant'),responsable:val('responsable'),service:val('service'),createdAt:new Date().toISOString()};const caBlock={global:{ca:ca,commandes:cmd,ticketMoyenGlobal:ticketMoyen},boissons:{ca:num('caBoissons'),quantite:num('qteBoissons')},desserts:{ca:num('caDesserts'),quantite:num('qteDesserts')},uber:{ca:num('caUber'),commandes:num('cmdUber')},deliveroo:{ca:num('caDeliveroo'),commandes:num('cmdDeliveroo')},clickCollect:{ca:num('caCC'),commandes:num('cmdCC')},bornesEtCaisseCalcule:{ca:bCA,commandes:bCmd}};const gestionClient={reductionsAppliquees:val('hasReductions'),reductions:val('hasReductions')==='Oui'?reductions.map(r=>({...r,montant:parseFloat(r.montant)||0})):[],commandesRefaites:val('hasRefaits'),refaits:val('hasRefaits')==='Oui'?refaits.map(r=>({...r,montant:parseFloat(r.montant)||0})):[]};const pertesService={nombreErreurs:num('nbErreurs'),montantErreurs:num('montantErreurs'),montantPertes:num('montantPertes'),montantTotalCalcule:pertesTotal};const rh={heuresPrevuesPlanning:num('heuresPrevuesPlanning'),heuresSuppRajoutees:val('hasHeuresSupp'),totalHeuresSuppCalcule:hSuppTotal,heuresReellesCalculees:hReelles,heuresSupp:val('hasHeuresSupp')==='Oui'?heuresSupp.map(h=>({...h,heures:diffHours(h.debut,h.fin)})):[],placements:{friture:val('placeFriture'),envoi:val('placeEnvoi'),pliage:val('placePliage'),toaster:val('placeToaster'),caisse:val('placeCaisse')},tempsAttenteMaxMinutes:num('tempsAttente'),explicationTempsAttente:val('expAttente')};const stocks=stockProducts.map(p=>({produit:p.label,kgSaisi:num(`stock_${p.id}_kg`),sachets:num(`stock_${p.id}_sachets`),cartons:num(`stock_${p.id}_cartons`),cartonKg:p.cartonKg,livraison:val(`stock_${p.id}_livraison`),livraisonCartons:val(`stock_${p.id}_livraison`)==='Oui'?num(`stock_${p.id}_livraisonCartons`):0,totalKg:stockTotalKg(p)}));const evaluation={fluidite:scaleVal('fluidite'),qualitePreparation:scaleVal('qualite'),satisfactionClient:scaleVal('satisfaction'),placement:scaleVal('placement'),motivationEquipe:scaleVal('motivation'),recuperationService:scaleVal('recuperation'),indiceService:indiceService(),explications:{fluidite:val('expFluidite'),qualite:val('expQualite'),satisfaction:val('expSatisfaction'),placement:val('expPlacement'),motivation:val('expMotivation'),recuperation:val('expRecuperation')},pointFort:val('pointFort'),amelioration:val('amelioration')};return {meta,matin:{ca:caBlock,gestionClient,pertesService,rh,stocks,evaluation},calculs:{ticketMoyenGlobal:ticketMoyen,caBornesEtCaisse:bCA,commandesBornesEtCaisse:bCmd,totalErreursEtPertes:pertesTotal,totalHeuresSupp:hSuppTotal,heuresReelles:hReelles,indiceService:indiceService()},googleSheets:{rapport:{...meta,caGlobal:ca,commandesGlobales:cmd,ticketMoyenGlobal:ticketMoyen,caBoissons:num('caBoissons'),quantiteBoissons:num('qteBoissons'),caDesserts:num('caDesserts'),quantiteDesserts:num('qteDesserts'),caBornesEtCaisse:bCA,commandesBornesEtCaisse:bCmd,totalErreursEtPertes:pertesTotal,totalHeuresSupp:hSuppTotal,heuresReelles:hReelles,indiceService:indiceService()},ca:caBlock,gestionClient,pertesService,rh,stocks,evaluation}}}
-function storageKey(){return 'competition_reporting_'+val('dateService')+'_'+val('restaurant')+'_'+val('service')}
-function isVisible(el){return !!(el.offsetWidth||el.offsetHeight||el.getClientRects().length)}
-function markInvalid(el,state){if(el)el.classList.toggle('invalid',!!state)}
-function rowsComplete(rows,keys){return rows.every(r=>keys.every(k=>String(r[k]??'').trim()!==''&&(k==='montant'?parseFloat(r[k])>=0:true)))}
-function validateAll(){qsa('.invalid').forEach(el=>el.classList.remove('invalid'));if(!commonComplete()){showToast('Complète d’abord les informations communes.');return false}let ok=true;qsa('input,select,textarea').forEach(el=>{if(el.disabled||el.readOnly||!isVisible(el))return;if(!el.value.trim()){markInvalid(el,true);ok=false}});['fluidite','qualite','satisfaction','placement','motivation','recuperation'].forEach(s=>{if(!scaleVal(s)){qsa(`input[name="${s}"]`).forEach(i=>i.closest('label')?.querySelector('span')?.classList.add('invalid'));ok=false}});if(val('hasReductions')==='Oui'&&!rowsComplete(reductions,['numero','montant','explication']))ok=false;if(val('hasRefaits')==='Oui'&&!rowsComplete(refaits,['numero','article','montant','explication']))ok=false;if(val('hasHeuresSupp')==='Oui'&&!rowsComplete(heuresSupp,['nom','debut','fin','motif']))ok=false;if(!ok)showToast('Complète tous les champs obligatoires affichés.');return ok}
-function saveLocal(){if(!validateAll())return;localStorage.setItem(storageKey(),JSON.stringify(collect()));showToast('Brouillon enregistré localement.')}async function validateReport(){if(!validateAll())return;const payload=collect();localStorage.setItem(storageKey(),JSON.stringify(payload));console.log('REPORTING_PAYLOAD_COMPLET',payload);if(!APPS_SCRIPT_URL){showToast('Rapport validé en local. Ajoute l’URL Apps Script pour envoyer chaque bloc dans sa feuille.');return}try{await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});showToast('Rapport envoyé vers Google Sheets.')}catch(e){console.error(e);showToast('Erreur d’envoi. Brouillon gardé en local.')}}function resetForm(){if(!confirm('Réinitialiser le formulaire affiché ?'))return;document.querySelector('form')?.reset();reductions=[];refaits=[];heuresSupp=[];qsa('input[type=radio]').forEach(i=>i.checked=false);renderRepeats();refresh();showToast('Formulaire réinitialisé.')}function init(){buildStocks();qsa('[data-scale]').forEach(el=>el.innerHTML=buildScale(el.dataset.scale));qsa('input,select,textarea').forEach(el=>{el.addEventListener('input',refresh);el.addEventListener('change',refresh)});$('restaurant').addEventListener('change',updateResponsables);['hasReductions','hasRefaits','hasHeuresSupp'].forEach(id=>$(id).addEventListener('change',()=>{if(id==='hasReductions'&&val(id)==='Oui'&&!reductions.length)addReduction();if(id==='hasRefaits'&&val(id)==='Oui'&&!refaits.length)addRefait();if(id==='hasHeuresSupp'&&val(id)==='Oui'&&!heuresSupp.length)addHeureSupp();renderRepeats();refresh()}));updateResponsables();refresh()}init();
-</script>
-</body>
-</html>
+
+function calculerFrites(data, caTotal) {
+  const stockMatinKg = getStockFritesMatin(data);
+  const stockSoirKg = calculerStockFritesKg(data);
+  const livraisonKg = n(data.fritesColis) * FRITES_KG_PAR_CARTON;
+
+  const consoKg = stockMatinKg + livraisonKg - stockSoirKg;
+  const consoEuro = consoKg * PRIX_KG_FRITES;
+  const consoPctCA = caTotal > 0 ? consoEuro / caTotal : 0;
+
+  const ecartPct = TAUX_THEORIQUE_FRITES - consoPctCA;
+  const ecartKg = caTotal > 0 ? (ecartPct * caTotal) / PRIX_KG_FRITES : 0;
+
+  let statut = "Conforme";
+
+  if (ecartPct > 0) {
+    statut = "Sous-consommation";
+  } else if (ecartPct < 0) {
+    statut = "Surconsommation";
+  }
+
+  return {
+    stockMatinKg,
+    livraisonKg,
+    stockSoirKg,
+    consoKg,
+    consoEuro,
+    consoPctCA,
+    objectifPctCA: TAUX_THEORIQUE_FRITES,
+    ecartPct,
+    ecartKg,
+    statut
+  };
+}
+
+function emptyFrites() {
+  return {
+    stockMatinKg: "",
+    livraisonKg: "",
+    stockSoirKg: "",
+    consoKg: "",
+    consoEuro: "",
+    consoPctCA: "",
+    objectifPctCA: "",
+    ecartPct: "",
+    ecartKg: "",
+    statut: ""
+  };
+}
+
+function calculerStockFritesKg(data) {
+  return (
+    n(data.fritesCarton) * FRITES_KG_PAR_CARTON +
+    n(data.fritesSachet) * FRITES_KG_PAR_SACHET +
+    n(data.fritesKg)
+  );
+}
+
+function getStockFritesMatin(data) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  const rows = sheet.getDataRange().getValues();
+  const headers = rows[0];
+
+  const iDate = headers.indexOf("Date reporting");
+  const iRestaurant = headers.indexOf("Restaurant");
+  const iService = headers.indexOf("Service");
+  const iStock = headers.indexOf("Stock Frites Kg");
+
+  if (iDate === -1 || iRestaurant === -1 || iService === -1 || iStock === -1) {
+    return 0;
+  }
+
+  const restaurant = normalize(data.restaurant);
+  const dateReporting = formatDateKey(data.dateReporting);
+
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (
+      formatDateKey(rows[i][iDate]) === dateReporting &&
+      normalize(rows[i][iRestaurant]) === restaurant &&
+      normalize(rows[i][iService]).includes("matin")
+    ) {
+      return n(rows[i][iStock]);
+    }
+  }
+
+  return 0;
+}
+
+function envoyerTelegram(data) {
+  const service = normalize(data.service);
+
+  if (service.includes("matin")) return;
+
+  const typeRapport = data.skelloStatus || "";
+  let message = "";
+
+  if (typeRapport === "Rapport annexe") {
+    message = `
+📎 RAPPORT ANNEXE O'TACOS
+
+🏪 Restaurant : ${data.restaurant || ""}
+📅 Date : ${data.dateReporting || ""}
+👤 Responsable : ${data.responsable || ""}
+
+🥩 Doses vendues VH : ${n(data.dosesVH)}
+🌭 Doses vendues Merguez : ${n(data.dosesMerguez)}
+`;
+  }
+
+  else if (typeRapport === "Saisir les heures réelles après validation") {
+    message = `
+⏱️ HEURES RÉELLES SKELLO
+
+🏪 Restaurant : ${data.restaurant || ""}
+📅 Date : ${data.dateReporting || ""}
+👤 Responsable : ${data.responsable || ""}
+
+⏰ Heures réelles Skello : ${n(data.heuresReellesSkello)}
+`;
+  }
+
+  else {
+    const prev = getPrevisionnel(data);
+
+    const caTotal = n(data.caRestaurant);
+    const caUber = n(data.caUber);
+    const caDeliveroo = n(data.caDeliveroo);
+    const caCC = n(data.caCC);
+    const caComptoir = caTotal - caUber - caDeliveroo - caCC;
+
+    const commandesTotal =
+      n(data.cmdRestaurant) +
+      n(data.cmdUber) +
+      n(data.cmdDeliveroo) +
+      n(data.cmdCC);
+
+    const ticketMoyen = commandesTotal > 0 ? caTotal / commandesTotal : 0;
+
+    const pertes = n(data.pertes);
+    const caBoissons = n(data.venteBoisson);
+    const caDesserts = n(data.venteDessert);
+    const caComplementaire = caBoissons + caDesserts;
+
+    const frites = calculerFrites(data, caTotal);
+
+    const statutFritesMessage =
+      frites.statut === "Surconsommation"
+        ? `🚨 Surconsommation de ${Math.abs(frites.ecartKg).toFixed(2)} kg`
+        : frites.statut === "Sous-consommation"
+          ? `✅ Sous-consommation de ${Math.abs(frites.ecartKg).toFixed(2)} kg`
+          : "✅ Conforme";
+
+    message = `
+📊 REPORTING O'TACOS — ANALYSE JOURNÉE
+
+🏪 Restaurant : ${data.restaurant || ""}
+📅 Date : ${data.dateReporting || ""}
+👤 Responsable : ${data.responsable || ""}
+
+━━━━━━━━━━━━━━
+
+💰 CA TOTAL
+
+Réel : ${euro(caTotal)}
+Prévu : ${euro(prev.caTotalPrevu)}
+Écart : ${ecartEuro(caTotal, prev.caTotalPrevu)}
+Variation : ${ecartPct(caTotal, prev.caTotalPrevu)}
+
+${statutObjectif(caTotal, prev.caTotalPrevu)}
+
+━━━━━━━━━━━━━━
+
+📊 RÉPARTITION CA
+
+🍔 Comptoir : ${euro(caComptoir)} — ${formatPct(ratio(caComptoir, caTotal))}
+🚴 Uber : ${euro(caUber)} — ${formatPct(ratio(caUber, caTotal))}
+🦘 Deliveroo : ${euro(caDeliveroo)} — ${formatPct(ratio(caDeliveroo, caTotal))}
+📲 C&C : ${euro(caCC)} — ${formatPct(ratio(caCC, caTotal))}
+
+━━━━━━━━━━━━━━
+
+🧾 COMMANDES
+
+Total : ${commandesTotal}
+Ticket moyen : ${euro(ticketMoyen)}
+
+━━━━━━━━━━━━━━
+
+🥤🍰 VENTES COMPLÉMENTAIRES
+
+Boissons : ${euro(caBoissons)} — ${formatPct(ratio(caBoissons, caTotal))}
+Desserts : ${euro(caDesserts)} — ${formatPct(ratio(caDesserts, caTotal))}
+Total complémentaire : ${euro(caComplementaire)} — ${formatPct(ratio(caComplementaire, caTotal))}
+
+━━━━━━━━━━━━━━
+
+🍟 FRITES
+
+Stock matin : ${n(frites.stockMatinKg).toFixed(2)} kg
+Livraison : ${n(frites.livraisonKg).toFixed(2)} kg
+Stock soir : ${n(frites.stockSoirKg).toFixed(2)} kg
+
+Conso réelle : ${n(frites.consoKg).toFixed(2)} kg
+Valeur réelle : ${euro(frites.consoEuro)}
+Taux réel : ${formatPct(frites.consoPctCA)}
+
+Objectif : ${formatPct(TAUX_THEORIQUE_FRITES)}
+Écart : ${formatPct(frites.ecartPct)}
+
+${statutFritesMessage}
+
+━━━━━━━━━━━━━━
+
+👥 MASSE SALARIALE
+
+Prévue : ${euro(prev.masseSalarialePrevue)}
+Ratio prévu / CA : ${formatPct(ratio(prev.masseSalarialePrevue, caTotal))}
+
+━━━━━━━━━━━━━━
+
+🗑️ PERTES
+
+Réelles : ${euro(pertes)}
+Prévues : ${euro(prev.pertesPrevues)}
+Écart : ${ecartEuro(pertes, prev.pertesPrevues)}
+Variation : ${ecartPct(pertes, prev.pertesPrevues)}
+Taux pertes / CA : ${formatPct(ratio(pertes, caTotal))}
+
+${statutPertes(pertes, prev.pertesPrevues)}
+
+━━━━━━━━━━━━━━
+
+💶 CAISSE
+
+Écart caisse : ${euro(n(data.ecartCaisse))}
+Réduction : ${euro(n(data.montantReduction))}
+
+━━━━━━━━━━━━━━
+
+⚠️ ALERTES
+
+${genererAlertes(data, prev, caTotal, pertes, ticketMoyen, frites)}
+
+━━━━━━━━━━━━━━
+
+📝 Appréciation :
+${data.appreciation || "RAS"}
+`;
+  }
+
+  UrlFetchApp.fetch(
+    "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage",
+    {
+      method: "post",
+      payload: {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message
+      },
+      muteHttpExceptions: true
+    }
+  );
+}
+
+function genererAlertes(data, prev, caTotal, pertes, ticketMoyen, frites) {
+  const alertes = [];
+
+  if (prev.caTotalPrevu > 0 && caTotal < prev.caTotalPrevu) {
+    alertes.push("⚠️ CA inférieur au prévisionnel");
+  }
+
+  if (prev.caTotalPrevu > 0 && pctEcart(caTotal, prev.caTotalPrevu) <= -10) {
+    alertes.push("🚨 CA inférieur de plus de 10 % au prévisionnel");
+  }
+
+  if (prev.pertesPrevues > 0 && pertes > prev.pertesPrevues) {
+    alertes.push("🚨 Pertes supérieures au prévisionnel");
+  }
+
+  if (caTotal > 0 && pertes / caTotal > 0.03) {
+    alertes.push("🚨 Taux de pertes supérieur à 3 % du CA");
+  }
+
+  if (frites && frites.statut === "Surconsommation") {
+    alertes.push("🚨 Surconsommation frites");
+  }
+
+  if (n(data.ecartCaisse) !== 0) {
+    alertes.push("⚠️ Écart caisse à contrôler");
+  }
+
+  if (ticketMoyen > 0 && ticketMoyen < 10) {
+    alertes.push("⚠️ Ticket moyen faible");
+  }
+
+  return alertes.length ? alertes.join("\n") : "✅ Aucun point critique détecté";
+}
+
+function creerOngletsPrevisionnelsSiBesoin() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+  RESTAURANTS_PREVISIONNEL.forEach(function(restaurant) {
+    const sheetName = "Prévisionnel " + restaurant;
+    let sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) sheet = ss.insertSheet(sheetName);
+    if (sheet.getLastRow() > 0) return;
+
+    sheet.appendRow([
+      "Date",
+      "CA Comptoir",
+      "CA Uber",
+      "CA Deliveroo",
+      "CA C&C",
+      "CA Total",
+      "Masse Salariale",
+      "Pertes"
+    ]);
+
+    const startDate = new Date(2026, 0, 1);
+    const endDate = new Date(2026, 11, 31);
+    const rows = [];
+
+    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+      rows.push([new Date(date), "", "", "", "", "", "", ""]);
+    }
+
+    sheet.getRange(2, 1, rows.length, 8).setValues(rows);
+    sheet.getRange("A:A").setNumberFormat("dddd d mmmm yyyy");
+    sheet.getRange("B:H").setNumberFormat("#,##0 €");
+    sheet.getRange(1, 1, 1, 8).setFontWeight("bold");
+    sheet.setFrozenRows(1);
+    sheet.autoResizeColumns(1, 8);
+  });
+}
+
+function getPrevisionnel(data) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const restaurant = trouverNomRestaurantPrevisionnel(data.restaurant);
+  const sheet = ss.getSheetByName("Prévisionnel " + restaurant);
+
+  if (!sheet) return emptyPrevisionnel();
+
+  const rows = sheet.getDataRange().getValues();
+  const dateReporting = formatDateKey(data.dateReporting);
+
+  for (let i = 1; i < rows.length; i++) {
+    if (formatDateKey(rows[i][0]) === dateReporting) {
+      return {
+        caRestaurantPrevu: n(rows[i][1]),
+        caUberPrevu: n(rows[i][2]),
+        caDeliverooPrevu: n(rows[i][3]),
+        caCCPrevu: n(rows[i][4]),
+        caTotalPrevu: n(rows[i][5]),
+        masseSalarialePrevue: n(rows[i][6]),
+        pertesPrevues: n(rows[i][7])
+      };
+    }
+  }
+
+  return emptyPrevisionnel();
+}
+
+function trouverNomRestaurantPrevisionnel(value) {
+  const restaurant = normalize(value);
+  if (restaurant.includes("boulogne")) return "Boulogne";
+  if (restaurant.includes("arment")) return "Armentières";
+  return value || "";
+}
+
+function emptyPrevisionnel() {
+  return {
+    caRestaurantPrevu: 0,
+    caUberPrevu: 0,
+    caDeliverooPrevu: 0,
+    caCCPrevu: 0,
+    caTotalPrevu: 0,
+    masseSalarialePrevue: 0,
+    pertesPrevues: 0
+  };
+}
+
+function n(value) {
+  if (value === "" || value === null || value === undefined) return 0;
+  return Number(String(value).replace(",", ".")) || 0;
+}
+
+function ratio(value, total) {
+  total = n(total);
+  return total > 0 ? n(value) / total : 0;
+}
+
+function normalize(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function formatDateKey(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function euro(value) {
+  return n(value).toFixed(2) + " €";
+}
+
+function formatPct(value) {
+  return (n(value) * 100).toFixed(2) + " %";
+}
+
+function pctEcart(reel, prevu) {
+  reel = n(reel);
+  prevu = n(prevu);
+  if (prevu === 0) return 0;
+  return ((reel - prevu) / prevu) * 100;
+}
+
+function ecartPct(reel, prevu) {
+  const pct = pctEcart(reel, prevu);
+  return (pct >= 0 ? "+" : "") + pct.toFixed(2) + " %";
+}
+
+function ecartEuro(reel, prevu) {
+  const ecart = n(reel) - n(prevu);
+  return (ecart >= 0 ? "+" : "") + ecart.toFixed(2) + " €";
+}
+
+function statutObjectif(reel, prevu) {
+  if (prevu === 0) return "ℹ️ Aucun prévisionnel renseigné";
+  return reel >= prevu ? "✅ Objectif CA atteint" : "⚠️ Objectif CA non atteint";
+}
+
+function statutPertes(reel, prevu) {
+  if (prevu === 0) return "ℹ️ Aucun prévisionnel pertes renseigné";
+  return reel <= prevu ? "✅ Pertes maîtrisées" : "🚨 Pertes supérieures au prévisionnel";
+}
+
+function jsonResponse(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet() {
+  creerOngletsPrevisionnelsSiBesoin();
+
+  return jsonResponse({
+    success: true,
+    message: "Web App Reporting O'TACOS active"
+  });
+}
