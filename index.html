@@ -25,7 +25,7 @@
   </section>
 
   <section class="panel">
-    <div class="block-head"><div><h2 class="block-title">Informations communes</h2><div class="block-help">Ces informations déclenchent l'affichage du rapport Matin ou Soir. Le Soir reprend exactement le même remplissage que le Matin.</div></div><span class="badge orange">Obligatoire</span></div>
+    <div class="block-head"><div><h2 class="block-title">Informations communes</h2><div class="block-help">Ces informations déclenchent l'affichage du rapport Matin ou Soir.</div></div><span class="badge orange">Obligatoire</span></div>
     <div class="controls">
       <div class="field"><label>Date du service *</label><input type="date" id="dateService" required></div>
       <div class="field"><label>Restaurant *</label><select id="restaurant" required><option value="">Choisir le restaurant</option><option value="boulogne">Boulogne-sur-Mer</option><option value="armentieres">Armentières</option></select></div>
@@ -47,28 +47,28 @@
 
     <form id="form" novalidate>
       <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Service — activité commerciale</h2><div class="block-help">CA saisi selon le service sélectionné. Matin = service du matin. Soir = cumul journée Matin + Soir.</div></div><span class="badge ok">CA</span></div>
+        <div class="block-head"><div><h2 class="block-title">Service — activité commerciale</h2><div class="block-help"> CA Matin = les totaux- ticket Z à la passation de sevice & Soir = les totaux- ticket Z à la fermeture.</div></div><span class="badge ok">CA</span></div>
         <div class="grid-4">
-          <div class="field"><label>CA global réalisé *</label><input type="number" step="0.01" min="0" id="caTotal" placeholder="CA toutes plateformes"></div>
-          <div class="field"><label>Nombre global de commandes *</label><input type="number" step="1" min="0" id="cmdTotal" placeholder="Commandes toutes plateformes"></div>
-          <div class="field"><label>CA boissons *</label><input type="number" step="0.01" min="0" id="caBoissons" placeholder="CA boissons"></div>
-          <div class="field"><label>Quantité boissons vendues *</label><input type="number" step="1" min="0" id="qteBoissons" placeholder="Nombre vendu"></div>
-          <div class="field"><label>CA desserts *</label><input type="number" step="0.01" min="0" id="caDesserts" placeholder="CA desserts"></div>
-          <div class="field"><label>Quantité desserts vendus *</label><input type="number" step="1" min="0" id="qteDesserts" placeholder="Nombre vendu"></div>
-          <div class="field"><label>CA Uber Eats</label><input type="number" step="0.01" min="0" id="caUber"></div>
-          <div class="field"><label>Commandes Uber Eats</label><input type="number" step="1" min="0" id="cmdUber"></div>
-          <div class="field"><label>CA Deliveroo</label><input type="number" step="0.01" min="0" id="caDeliveroo"></div>
-          <div class="field"><label>Commandes Deliveroo</label><input type="number" step="1" min="0" id="cmdDeliveroo"></div>
-          <div class="field"><label>CA Click & Collect</label><input type="number" step="0.01" min="0" id="caCC"></div>
-          <div class="field"><label>Commandes C&C</label><input type="number" step="1" min="0" id="cmdCC"></div>
-          <div class="field calc-field"><label>CA Bornes & caisse calculé</label><input id="caBornes" readonly></div>
-          <div class="field calc-field"><label>Commandes Bornes & caisse calculées</label><input id="cmdBornes" readonly></div>
+          <div class="field"><label>CA global - Ticket Z *</label><input type="number" step="0.01" min="0" id="caTotal" placeholder="CA toutes plateformes"></div>
+          <div class="field"><label>Nbr global de commandes - ticket Z*</label><input type="number" step="1" min="0" id="cmdTotal" placeholder="Commandes toutes plateformes"></div>
+          <div class="field"><label>CA total boissons *</label><input type="number" step="0.01" min="0" id="caBoissons" placeholder="CA boissons"></div>
+          <div class="field"><label>Quantité total boissons vendues *</label><input type="number" step="1" min="0" id="qteBoissons" placeholder="Nombre vendu"></div>
+          <div class="field"><label>CA total desserts *</label><input type="number" step="0.01" min="0" id="caDesserts" placeholder="CA desserts"></div>
+          <div class="field"><label>Quantité total desserts vendus *</label><input type="number" step="1" min="0" id="qteDesserts" placeholder="Nombre vendu"></div>
+          <div class="field"><label>CA Uber Eats - Ticket Z</label><input type="number" step="0.01" min="0" id="caUber"></div>
+          <div class="field"><label>Nbr Commandes Uber Eats - Ticket Z</label><input type="number" step="1" min="0" id="cmdUber"></div>
+          <div class="field"><label>CA Deliveroo - Ticket Z</label><input type="number" step="0.01" min="0" id="caDeliveroo"></div>
+          <div class="field"><label>Nbr Commandes Deliveroo - Ticket Z</label><input type="number" step="1" min="0" id="cmdDeliveroo"></div>
+          <div class="field"><label>CA Click & Collect - Ticket Z</label><input type="number" step="0.01" min="0" id="caCC"></div>
+          <div class="field"><label>Nbr Commandes C&C - Ticket Z</label><input type="number" step="1" min="0" id="cmdCC"></div>
+          <div class="field calc-field"><label>CA Bornes & caisse calculé - à vérifier</label><input id="caBornes" readonly></div>
+          <div class="field calc-field"><label>Commandes Bornes & caisse calculées - à vérifier</label><input id="cmdBornes" readonly></div>
         </div>
-        <div class="note">Le CA Bornes & caisse est calculé automatiquement : CA global - Uber Eats - Deliveroo - Click & Collect. Pour le Soir, la saisie CA/commandes est cumulative journée : Matin + Soir. Le dashboard devra calculer le vrai Soir par différence avec le Matin du même restaurant et de la même date.</div>
+        <div class="note">Le CA Bornes & caisse est calculé automatiquement. Pour le Soir, la saisie CA/commandes est cumulative journée : Total. Le reporting calcule automatiquement : le Soir en prenant en compte la saisie du matin.</div>
       </section>
 
       <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Service — réductions & commandes refaites</h2><div class="block-help">Saisie dynamique : plusieurs commandes possibles.</div></div><span class="badge">Gestion client</span></div>
+        <div class="block-head"><div><h2 class="block-title">Service — réductions & commandes refaites</h2><div class="block-help">plusieurs commandes possibles à saisir.</div></div><span class="badge">Gestion client</span></div>
         <div class="grid-2">
           <div class="field"><label>Réduction appliquée aux clients ?</label><select id="hasReductions"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
           <div class="field"><label>Commande refaite à un client ?</label><select id="hasRefaits"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
@@ -78,7 +78,7 @@
       </section>
 
       <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Service — pertes du service</h2><div class="block-help">Suivi des erreurs, pertes et montant total calculé automatiquement.</div></div><span class="badge orange">Pertes</span></div>
+        <div class="block-head"><div><h2 class="block-title">Service — pertes du service</h2><div class="block-help">À saisir depuis INPULSE (important de tout saisir).</div></div><span class="badge orange">Pertes</span></div>
         <div class="grid-4">
           <div class="field"><label>Nombre d'erreurs</label><input type="number" step="1" min="0" id="nbErreurs"></div>
           <div class="field"><label>Montant des erreurs</label><input type="number" step="0.01" min="0" id="montantErreurs"></div>
@@ -88,20 +88,20 @@
       </section>
 
       <section class="block report report-matin">
-        <div class="block-head"><div><h2 class="block-title">Service — RH & organisation du rush</h2><div class="block-help">Les listes équipiers sont prêtes à être connectées à Google Sheets via Apps Script.</div></div><span class="badge orange">RH</span></div>
+        <div class="block-head"><div><h2 class="block-title">Service — RH & organisation du rush</h2><div class="block-help"></div></div><span class="badge orange">RH</span></div>
         <div class="grid-2">
           <div class="sub-card">
             <h3 class="sub-title">Planning & heures supplémentaires</h3>
             <div class="grid-3">
-              <div class="field"><label>Heures prévues dans le planning *</label><input type="number" step="0.01" min="0" id="heuresPrevuesPlanning" placeholder="Ex : 18,50"></div>
+              <div class="field"><label>Heures prévues dans le planning - tout le monde de l'ouverture à 16h (Matin) et 16h à la fermeture (Soir) *</label><input type="number" step="0.01" min="0" id="heuresPrevuesPlanning" placeholder="Ex : 18,50"></div>
               <div class="field calc-field"><label>Heures réelles calculées</label><input id="heuresReellesCalc" readonly></div>
-              <div class="field"><label>Heures supplémentaires rajoutées ?</label><select id="hasHeuresSupp"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
+              <div class="field"><label>Heures supplémentaires rajoutées ? (Rapport heures supp)</label><select id="hasHeuresSupp"><option value="">Choisir</option><option>Non</option><option>Oui</option></select></div>
             </div>
             <div id="hsWrap" class="hidden"><div class="block-head" style="margin-top:12px;margin-bottom:0"><h2 class="block-title">Équipiers avec heures supplémentaires</h2><button type="button" class="mini-btn primary" onclick="addHeureSupp()">+ Ajouter un équipier</button></div><div class="repeat-list" id="hsList"></div></div>
           </div>
           <div class="sub-card">
             <h3 class="sub-title">Temps d'attente</h3>
-            <div class="field"><label>Temps d'attente le plus élevé du service *</label><input type="number" step="1" min="0" id="tempsAttente" placeholder="Minutes"></div>
+            <div class="field"><label>Temps d'attente le plus élevé du service (le pic du service sur le KDS) *</label><input type="number" step="1" min="0" id="tempsAttente" placeholder="Minutes"></div>
             <div class="field hidden" id="expAttenteWrap" style="margin-top:10px"><label>Explication obligatoire si temps d'attente &gt; 10 min</label><textarea id="expAttente" placeholder="Cause du temps d'attente et action corrective."></textarea></div>
           </div>
         </div>
@@ -144,11 +144,6 @@
           <div class="field"><label>Points à améliorer pour le prochain service</label><textarea id="amelioration" placeholder="Action concrète à prévoir au prochain service."></textarea></div>
         </div>
       </section>
-
-      <section class="block report report-soir hidden disabled-info">
-        <div class="block-head"><div><h2 class="block-title">Logique Soir & Dashboard</h2><div class="block-help">Cette zone est informative : le formulaire du Soir utilise exactement les mêmes champs que le Matin.</div></div><span class="badge orange">Règles</span></div>
-        <div class="note warn">Pour le service Soir, le CA et les commandes saisis sont cumulés journée : Matin + Soir. Les heures RH ne sont pas cumulatives. Le stock saisi le soir correspond au stock restant après la journée. Le dashboard pourra donc comparer Matin, Soir réel, Journée complète, par restaurant et entre restaurants, avec filtres jour / semaine / mois.</div>
-      </section>
     </form>
   </div>
 </div>
@@ -160,7 +155,7 @@
 const APPS_SCRIPT_URL='https://script.google.com/macros/s/AKfycbwJDn4D1hz8e9hV6xjZxtvhfQNGf_Fs-9cxHNG_eh9pq8sQDEByXGZu8-pNM0KVbeZ45g/exec';
 const $=id=>document.getElementById(id);const qsa=s=>[...document.querySelectorAll(s)];
 const responsables={boulogne:['Imane','Guillaume','Pape','Omar'],armentieres:['Imane','Anouar','Babacar','Omar']};
-const employeesFallback={boulogne:['Imane','Guillaume','Pape','Omar','Équipier 1','Équipier 2','Équipier 3'],armentieres:['Imane','Anouar','Babacar','Omar','Équipier 1','Équipier 2','Équipier 3']};
+const employeesFallback={boulogne:['Guillaume','Pape','David','Said','Hossam','Fanny','Ibrahima','Usman','Yassine','Christopher'],armentieres:['Babacar','Anouar','Bimata','Adnan','Moussa','ZabiUllah','Ousmane','Younes']};
 let employees={...employeesFallback};
 const stockProducts=[{id:'frites',label:'Frites',cartonKg:10},{id:'viande',label:'Viande hachée',cartonKg:10},{id:'merguez',label:'Merguez',cartonKg:5}];
 let reductions=[],refaits=[],heuresSupp=[];let lastStockService='';let isSendingReport=false;
