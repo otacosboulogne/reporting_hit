@@ -208,7 +208,7 @@ function isAllowedDate(){const d=val('dateService');return !!d&&(isDateUnlocked(
 function isAllowedHuileDate(){const d=val('huileDate');if(val('huileChangement')!=='Oui')return true;return !!d&&(isDateUnlocked()||(d>=yesterdayISO()&&d<=todayISO()))}
 function reportUniqueKey(){return val('dateService')&&val('restaurant')&&val('service')?`competition_reporting_sent_${val('dateService')}_${val('restaurant')}_${val('service')}`:''}
 function reportHumanLabel(){return `${restoLabel()} · ${val('dateService')||'-'} · ${val('service')==='matin'?'Matin':'Soir'}`}
-function isReportAlreadySent(){const k=reportUniqueKey();return !!k&&localStorage.getItem(k)==='sent'}
+function isReportAlreadySent(){const d=val('dateService'),r=val('restaurant'),s=val('service');const ck=serverReportCacheKey(d,r,s);if(ck&&reportStatusCache[ck]?.checkedAt)return !!reportStatusCache[ck].exists;return isReportSentLocal(d,r,s)}
 function sentReportKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`competition_reporting_sent_${dateService}_${restaurantCode}_${service}`:''}
 function serverReportCacheKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`${dateService}_${restaurantCode}_${service}`:''}
 function isReportSentLocal(dateService,restaurantCode,service){const k=sentReportKey(dateService,restaurantCode,service);return !!k&&localStorage.getItem(k)==='sent'}
@@ -237,11 +237,15 @@ function cacheServerReportStatus(dateService,restaurantCode,service,data){
   const exists=!!(data&&data.exists);
   const payload=data?.payload||data?.rapportPayload||null;
   reportStatusCache[cacheKey]={exists,payload,checkedAt:Date.now(),raw:data||null};
+  const sentKey=sentReportKey(dateService,restaurantCode,service);
   if(exists){
-    const sentKey=sentReportKey(dateService,restaurantCode,service);
     localStorage.setItem(sentKey,'sent');
     localStorage.setItem(sentKey+'_sentAt',data?.sentAt||data?.createdAt||new Date().toISOString());
     if(payload){try{localStorage.setItem(sentKey+'_payload',JSON.stringify(payload))}catch(e){}}
+  }else if(data&&data.ok!==false){
+    localStorage.removeItem(sentKey);
+    localStorage.removeItem(sentKey+'_sentAt');
+    localStorage.removeItem(sentKey+'_payload');
   }
 }
 async function checkReportOnServer(dateService,restaurantCode,service,force=false){
@@ -514,11 +518,20 @@ async function validateReport(){
   }
   try{
     await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    markReportSent(payload);
-    isSendingReport=false;
-    updateSubmitButtonState();
-    setSendStatus(`Rapport envoyé. Il n’est plus possible de renvoyer : ${reportHumanLabel()}.`,'ok');
-    showToast('Rapport envoyé vers Google Sheets.');
+    await new Promise(resolve=>setTimeout(resolve,1200));
+    const confirmed=await checkReportOnServer(val('dateService'),val('restaurant'),val('service'),true).catch(()=>null);
+    if(confirmed&&confirmed.exists){
+      markReportSent(confirmed.payload||payload);
+      isSendingReport=false;
+      updateSubmitButtonState();
+      setSendStatus(`Rapport envoyé et confirmé dans Google Sheets : ${reportHumanLabel()}.`,'ok');
+      showToast('Rapport confirmé dans Google Sheets.');
+    }else{
+      isSendingReport=false;
+      updateSubmitButtonState();
+      setSendStatus('Envoi non confirmé dans Google Sheets. Ne renvoie pas tout de suite : vérifie l’onglet rapports ou réessaie après quelques secondes.','warn');
+      showToast('Envoi non confirmé.');
+    }
   }catch(e){
     console.error(e);
     isSendingReport=false;
