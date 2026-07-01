@@ -208,13 +208,41 @@ function isAllowedDate(){const d=val('dateService');return !!d&&(isDateUnlocked(
 function isAllowedHuileDate(){const d=val('huileDate');if(val('huileChangement')!=='Oui')return true;return !!d&&(isDateUnlocked()||(d>=yesterdayISO()&&d<=todayISO()))}
 function reportUniqueKey(){return val('dateService')&&val('restaurant')&&val('service')?`competition_reporting_sent_${val('dateService')}_${val('restaurant')}_${val('service')}`:''}
 function reportHumanLabel(){return `${restoLabel()} · ${val('dateService')||'-'} · ${val('service')==='matin'?'Matin':'Soir'}`}
-function isReportAlreadySent(){const d=val('dateService'),r=val('restaurant'),s=val('service');const ck=serverReportCacheKey(d,r,s);if(ck&&reportStatusCache[ck]?.checkedAt)return !!reportStatusCache[ck].exists;return isReportSentLocal(d,r,s)}
+function isReportAlreadySent(){
+  if(!commonComplete())return false;
+  return isReportSentFor(val('dateService'),val('restaurant'),val('service'));
+}
 function sentReportKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`competition_reporting_sent_${dateService}_${restaurantCode}_${service}`:''}
 function serverReportCacheKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`${dateService}_${restaurantCode}_${service}`:''}
+function clearReportSentLocal(dateService,restaurantCode,service){
+  const k=sentReportKey(dateService,restaurantCode,service);
+  if(!k)return;
+  localStorage.removeItem(k);
+  localStorage.removeItem(k+'_sentAt');
+  localStorage.removeItem(k+'_payload');
+}
 function isReportSentLocal(dateService,restaurantCode,service){const k=sentReportKey(dateService,restaurantCode,service);return !!k&&localStorage.getItem(k)==='sent'}
 function isReportStatusChecked(dateService,restaurantCode,service){const k=serverReportCacheKey(dateService,restaurantCode,service);return !!(k&&reportStatusCache[k]&&reportStatusCache[k].checkedAt)}
-function isReportStatusUnknown(dateService,restaurantCode,service){return !!(APPS_SCRIPT_URL&&dateService&&restaurantCode&&service&&!isReportSentLocal(dateService,restaurantCode,service)&&!isReportStatusChecked(dateService,restaurantCode,service))}
-function isReportSentFor(dateService,restaurantCode,service){const k=serverReportCacheKey(dateService,restaurantCode,service);if(k&&reportStatusCache[k]?.exists)return true;return isReportSentLocal(dateService,restaurantCode,service)}
+function isReportStatusUnknown(dateService,restaurantCode,service){
+  return !!(
+    APPS_SCRIPT_URL &&
+    dateService &&
+    restaurantCode &&
+    service &&
+    !isReportStatusChecked(dateService,restaurantCode,service)
+  );
+}
+function isReportSentFor(dateService,restaurantCode,service){
+  const k=serverReportCacheKey(dateService,restaurantCode,service);
+  const cached=k?reportStatusCache[k]:null;
+
+  if(cached&&cached.checkedAt){
+    if(cached.ok===false||cached.error)return false;
+    return !!cached.exists;
+  }
+
+  return isReportSentLocal(dateService,restaurantCode,service);
+}
 function appsScriptJsonp(params={},timeoutMs=9000){
   return new Promise((resolve,reject)=>{
     if(!APPS_SCRIPT_URL){resolve(null);return}
@@ -234,26 +262,48 @@ function appsScriptJsonp(params={},timeoutMs=9000){
 function cacheServerReportStatus(dateService,restaurantCode,service,data){
   const cacheKey=serverReportCacheKey(dateService,restaurantCode,service);
   if(!cacheKey)return;
-  const exists=!!(data&&data.exists);
+
+  const ok=data&&data.ok!==false;
+  const exists=!!(ok&&data&&data.exists);
   const payload=data?.payload||data?.rapportPayload||null;
-  reportStatusCache[cacheKey]={exists,payload,checkedAt:Date.now(),raw:data||null};
-  const sentKey=sentReportKey(dateService,restaurantCode,service);
-  if(exists){
-    localStorage.setItem(sentKey,'sent');
-    localStorage.setItem(sentKey+'_sentAt',data?.sentAt||data?.createdAt||new Date().toISOString());
-    if(payload){try{localStorage.setItem(sentKey+'_payload',JSON.stringify(payload))}catch(e){}}
-  }else if(data&&data.ok!==false){
-    localStorage.removeItem(sentKey);
-    localStorage.removeItem(sentKey+'_sentAt');
-    localStorage.removeItem(sentKey+'_payload');
+
+  reportStatusCache[cacheKey]={
+    ok,
+    exists,
+    payload,
+    checkedAt:Date.now(),
+    error:!ok,
+    raw:data||null
+  };
+
+  if(ok){
+    const sentKey=sentReportKey(dateService,restaurantCode,service);
+    if(exists){
+      localStorage.setItem(sentKey,'sent');
+      localStorage.setItem(sentKey+'_sentAt',data?.sentAt||data?.createdAt||new Date().toISOString());
+      if(payload){try{localStorage.setItem(sentKey+'_payload',JSON.stringify(payload))}catch(e){}}
+    }else{
+      clearReportSentLocal(dateService,restaurantCode,service);
+    }
   }
 }
 async function checkReportOnServer(dateService,restaurantCode,service,force=false){
   if(!APPS_SCRIPT_URL||!dateService||!restaurantCode||!service)return null;
   const cacheKey=serverReportCacheKey(dateService,restaurantCode,service);
   if(!force&&reportStatusCache[cacheKey]?.checkedAt)return reportStatusCache[cacheKey];
-  const data=await appsScriptJsonp({action:'checkReport',dateService,restaurantCode,service});
-  cacheServerReportStatus(dateService,restaurantCode,service,data);
+
+  try{
+    const data=await appsScriptJsonp({action:'checkReport',dateService,restaurantCode,service},12000);
+    cacheServerReportStatus(dateService,restaurantCode,service,data);
+  }catch(e){
+    console.error('Erreur checkReport Google Sheets',e);
+    cacheServerReportStatus(dateService,restaurantCode,service,{
+      ok:false,
+      exists:false,
+      error:String(e&&e.message?e.message:e)
+    });
+  }
+
   return reportStatusCache[cacheKey]||null;
 }
 function dependencyStatusTargets(){
@@ -272,9 +322,15 @@ async function ensureReportStatusesFromServer(force=false){
   if(!commonComplete()||!APPS_SCRIPT_URL)return;
   isCheckingReportStatus=true;
   updateSubmitButtonState();
-  try{await Promise.all(dependencyStatusTargets().map(t=>checkReportOnServer(t.dateService,t.restaurantCode,t.service,force)))}catch(e){console.error(e);setSendStatus('Impossible de vérifier Google Sheets. Vérifie que le doGet checkReport est ajouté dans Apps Script.','warn')}
-  isCheckingReportStatus=false;
-  updateSubmitButtonState();
+  try{
+    await Promise.all(dependencyStatusTargets().map(t=>checkReportOnServer(t.dateService,t.restaurantCode,t.service,force)));
+  }catch(e){
+    console.error(e);
+    setSendStatus('Vérification Google Sheets impossible pour le moment. Le formulaire reste utilisable, le brouillon est conservé.','warn');
+  }finally{
+    isCheckingReportStatus=false;
+    updateSubmitButtonState();
+  }
 }
 function scheduleReportStatusCheck(force=false){
   if(!commonComplete()||!APPS_SCRIPT_URL)return;
@@ -285,8 +341,39 @@ function scheduleReportStatusCheck(force=false){
   reportStatusCheckTimer=setTimeout(()=>ensureReportStatusesFromServer(force),250);
 }
 function previousDateISO(dateISO){if(!dateISO)return '';const parts=dateISO.split('-').map(Number);if(parts.length!==3||parts.some(Number.isNaN))return '';const d=new Date(parts[0],parts[1]-1,parts[2]);d.setDate(d.getDate()-1);return localISODate(d)}
-function sendDependencyMessage(){if(!commonComplete())return '';const d=val('dateService'),r=val('restaurant'),s=val('service');if(s==='soir'){if(isReportStatusUnknown(d,r,'matin'))return '';if(!isReportSentFor(d,r,'matin'))return `Impossible d’envoyer le rapport Soir : il faut d’abord envoyer le rapport Matin du ${d} pour ${restoLabel()}.`;}return ''}
-function hasMorningPreviousReportMissing(){if(!commonComplete()||val('service')!=='matin')return false;const prev=previousDateISO(val('dateService'));if(!prev)return false;if(isReportStatusUnknown(prev,val('restaurant'),'soir'))return false;return !isReportSentFor(prev,val('restaurant'),'soir')}
+function sendDependencyMessage(){
+  if(!commonComplete())return '';
+
+  const d=val('dateService'),r=val('restaurant'),s=val('service');
+
+  if(s==='soir'){
+    const k=serverReportCacheKey(d,r,'matin');
+    const cached=k?reportStatusCache[k]:null;
+
+    if(isReportStatusUnknown(d,r,'matin'))return '';
+    if(cached&&(cached.ok===false||cached.error))return '';
+
+    if(!isReportSentFor(d,r,'matin')){
+      return `Impossible d’envoyer le rapport Soir : il faut d’abord envoyer le rapport Matin du ${d} pour ${restoLabel()}.`;
+    }
+  }
+
+  return '';
+}
+function hasMorningPreviousReportMissing(){
+  if(!commonComplete()||val('service')!=='matin')return false;
+
+  const prev=previousDateISO(val('dateService'));
+  if(!prev)return false;
+
+  const k=serverReportCacheKey(prev,val('restaurant'),'soir');
+  const cached=k?reportStatusCache[k]:null;
+
+  if(isReportStatusUnknown(prev,val('restaurant'),'soir'))return false;
+  if(cached&&(cached.ok===false||cached.error))return false;
+
+  return !isReportSentFor(prev,val('restaurant'),'soir');
+}
 function morningDependencyWarningKey(){return val('dateService')&&val('restaurant')?`competition_reporting_morning_warning_skipped_${val('dateService')}_${val('restaurant')}`:''}
 function shouldShowMorningDependencyWarning(){const k=morningDependencyWarningKey();return !!(hasMorningPreviousReportMissing()&&(!k||sessionStorage.getItem(k)!=='skipped'))}
 function morningDependencyWarningMessage(){const prev=previousDateISO(val('dateService'));return `Le rapport de la veille (${prev}) n’est pas fait pour ${restoLabel()}. Informe Omar avant de commencer le rapport. Tu peux skipper ce message pour remplir le rapport. Après validation, il sera enregistré en brouillon et l’envoi se fera uniquement après l’accord oral d’Omar.`}
@@ -299,7 +386,56 @@ function closeMorningDraftOverlay(){const overlay=$('morningDraftOverlay');if(ov
 function sendMorningDraftAfterOmar(){morningDependencyWarningForceSend=true;closeMorningDraftOverlay();validateReport()}
 function markReportSent(payload){const k=reportUniqueKey();if(!k)return;localStorage.setItem(k,'sent');localStorage.setItem(k+'_sentAt',new Date().toISOString());try{localStorage.setItem(k+'_payload',JSON.stringify(payload))}catch(e){}}
 function setSendStatus(msg,type=''){const el=$('sendStatus');if(!el)return;el.textContent=msg||'';el.className='send-status'+(msg?' show':'')+(type?' '+type:'')}
-function updateSubmitButtonState(){const btn=$('validateBtn');if(!btn)return;btn.classList.remove('hidden');if(isSendingReport){btn.disabled=true;btn.textContent='Envoi en cours...';return}if(commonComplete()&&(isCheckingReportStatus||hasPendingReportStatusCheck())){btn.disabled=true;btn.textContent='Vérification...';setSendStatus('Vérification dans Google Sheets en cours : rapport actuel et rapports nécessaires.','warn');return}if(isReportAlreadySent()){btn.disabled=true;btn.textContent='Rapport déjà envoyé';setSendStatus(`Ce rapport a déjà été envoyé : ${reportHumanLabel()}.`,'ok');return}const depMsg=sendDependencyMessage();if(depMsg){btn.disabled=true;btn.textContent='Envoi bloqué';setSendStatus(depMsg,'warn');return}if(hasMorningPreviousReportMissing()){btn.classList.add('hidden');btn.disabled=true;setSendStatus('Rapport de la veille non fait : informe Omar. Le bouton envoyer est masqué. Enregistre le brouillon, puis envoie uniquement après l’accord oral d’Omar.','warn');return}btn.disabled=false;btn.textContent='Valider le rapport';setSendStatus('', '')} 
+function updateSubmitButtonState(){
+  const btn=$('validateBtn');
+  if(!btn)return;
+
+  btn.classList.remove('hidden');
+
+  if(isSendingReport){
+    btn.disabled=true;
+    btn.textContent='Envoi en cours...';
+    return;
+  }
+
+  if(commonComplete()&&isCheckingReportStatus){
+    btn.disabled=true;
+    btn.textContent='Vérification...';
+    setSendStatus('Vérification dans Google Sheets en cours : rapport actuel et rapports nécessaires.','warn');
+    return;
+  }
+
+  if(isReportAlreadySent()){
+    btn.disabled=true;
+    btn.textContent='Rapport déjà envoyé';
+    setSendStatus(`Ce rapport a déjà été envoyé : ${reportHumanLabel()}.`,'ok');
+    return;
+  }
+
+  const depMsg=sendDependencyMessage();
+  if(depMsg){
+    btn.disabled=true;
+    btn.textContent='Envoi bloqué';
+    setSendStatus(depMsg,'warn');
+    return;
+  }
+
+  if(hasMorningPreviousReportMissing()){
+    btn.classList.add('hidden');
+    btn.disabled=true;
+    setSendStatus('Rapport de la veille non fait : informe Omar. Le bouton envoyer est masqué. Enregistre le brouillon, puis envoie uniquement après l’accord oral d’Omar.','warn');
+    return;
+  }
+
+  btn.disabled=false;
+  btn.textContent='Valider le rapport';
+
+  if(commonComplete()&&hasPendingReportStatusCheck()){
+    setSendStatus('Vérification Google Sheets en attente. Tu peux remplir le rapport, la vérification sera relancée avant l’envoi.','warn');
+  }else{
+    setSendStatus('', '');
+  }
+} 
 function parseTimeMinutes(value){const raw=String(value||'').trim().toLowerCase();if(!raw)return null;let h=null,m=null;let match=raw.match(/^(\d{1,2})\s*(?:h|:|\.)\s*(\d{0,2})/);if(match){h=parseInt(match[1],10);m=match[2]===''?0:parseInt(match[2],10)}else{const digits=raw.replace(/\D/g,'');if(digits.length===4){h=parseInt(digits.slice(0,2),10);m=parseInt(digits.slice(2),10)}else if(digits.length===3){h=parseInt(digits.slice(0,1),10);m=parseInt(digits.slice(1),10)}else if(digits.length===1||digits.length===2){h=parseInt(digits,10);m=0}}if(h===null||m===null||Number.isNaN(h)||Number.isNaN(m))return null;if(h<0||h>23||m<0||m>59)return null;return h*60+m}
 function cleanTime(value){const mins=parseTimeMinutes(value);if(mins===null)return String(value||'').trim();const h=Math.floor(mins/60),m=mins%60;return String(h).padStart(2,'0')+'H'+String(m).padStart(2,'0')+'min'}
 function diffHours(start,end){const s=parseTimeMinutes(start),e=parseTimeMinutes(end);if(s===null||e===null)return 0;let mins=e-s;if(mins<0)mins+=24*60;return Math.round((mins/60)*100)/100}
@@ -491,23 +627,30 @@ async function saveLocal(){
 }
 async function validateReport(){
   if(isSendingReport)return;
-  await ensureReportStatusesFromServer(false);
+
+  await ensureReportStatusesFromServer(true);
+
   if(!validateAll())return;
+
   const payload=collect();
   saveDraftLocalSilent(payload);
   console.log('REPORTING_PAYLOAD_COMPLET',payload);
+
   const sendAfterOmarValidation=morningDependencyWarningForceSend;
   morningDependencyWarningForceSend=false;
+
   if(hasMorningPreviousReportMissing()&&!sendAfterOmarValidation){
     setSendStatus('Brouillon enregistré dans ce téléphone. Dès qu’Omar donne son accord à l’oral, clique sur « Envoyer maintenant ».','warn');
     showToast('Brouillon enregistré dans ce téléphone.');
     showMorningDraftOverlay();
     return;
   }
+
   isSendingReport=true;
   updateSubmitButtonState();
   setSendStatus('Ne quittez pas la page, le rapport est en cours d’envoi vers Google Sheets...','warn');
   showToast('Envoi en cours, ne quittez pas la page.');
+
   if(!APPS_SCRIPT_URL){
     markReportSent(payload);
     isSendingReport=false;
@@ -516,10 +659,27 @@ async function validateReport(){
     showToast('Rapport validé en local.');
     return;
   }
+
   try{
-    await fetch(APPS_SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    await new Promise(resolve=>setTimeout(resolve,1200));
-    const confirmed=await checkReportOnServer(val('dateService'),val('restaurant'),val('service'),true).catch(()=>null);
+    await fetch(APPS_SCRIPT_URL,{
+      method:'POST',
+      mode:'no-cors',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+
+    let confirmed=null;
+    for(let i=0;i<5;i++){
+      await new Promise(resolve=>setTimeout(resolve,i===0?2200:1500));
+      confirmed=await checkReportOnServer(
+        val('dateService'),
+        val('restaurant'),
+        val('service'),
+        true
+      );
+      if(confirmed&&confirmed.exists)break;
+    }
+
     if(confirmed&&confirmed.exists){
       markReportSent(confirmed.payload||payload);
       isSendingReport=false;
@@ -527,13 +687,15 @@ async function validateReport(){
       setSendStatus(`Rapport envoyé et confirmé dans Google Sheets : ${reportHumanLabel()}.`,'ok');
       showToast('Rapport confirmé dans Google Sheets.');
     }else{
+      clearReportSentLocal(val('dateService'),val('restaurant'),val('service'));
       isSendingReport=false;
       updateSubmitButtonState();
-      setSendStatus('Envoi non confirmé dans Google Sheets. Ne renvoie pas tout de suite : vérifie l’onglet rapports ou réessaie après quelques secondes.','warn');
-      showToast('Envoi non confirmé.');
+      setSendStatus('Envoi non confirmé dans Google Sheets. Le brouillon est conservé, tu peux réessayer après quelques secondes.','warn');
+      showToast('Envoi non confirmé. Brouillon conservé.');
     }
   }catch(e){
     console.error(e);
+    clearReportSentLocal(val('dateService'),val('restaurant'),val('service'));
     isSendingReport=false;
     updateSubmitButtonState();
     setSendStatus('Erreur d’envoi. Le brouillon est gardé en local, tu peux réessayer.','warn');
