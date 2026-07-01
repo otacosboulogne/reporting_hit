@@ -195,7 +195,7 @@ const employeesFallback={boulogne:['Guillaume','Pape','David','Said','Hossam','F
 let employees={...employeesFallback};
 const stockProducts=[{id:'frites',label:'Frites',cartonKg:10,sachetKg:2.5},{id:'merguez',label:'Merguez',cartonKg:5,sachetKg:2.5},{id:'viande',label:'Viande hachée',cartonKg:5,sachetKg:2.5},{id:'viandeKebab',label:'Viande Kebab',cartonKg:8,sachetKg:1},{id:'pouletMarine',label:'Poulet Mariné',cartonKg:10,sachetKg:2.5},{id:'pouletNature',label:'Poulet Nature',cartonKg:5,sachetKg:1}];
 const friteusesByRestaurant={boulogne:['Friteuse grande gauche','Friteuse grande droite'],armentieres:['Friteuse grande gauche','Friteuse grande droite','Friteuse petite droite','Friteuse petite gauche']};
-let reductions=[],refaits=[],heuresSupp=[],responsablesErreurs=[],huileFriteusesSelection=[];let lastStockService='';let isSendingReport=false;let morningDependencyWarningForceSend=false;let isRestoringDraft=false;let lastDraftRestoreKey='';let draftAutosaveTimer=null;
+let reductions=[],refaits=[],heuresSupp=[],responsablesErreurs=[],huileFriteusesSelection=[];let lastStockService='';let isSendingReport=false;let morningDependencyWarningForceSend=false;let isRestoringDraft=false;let lastDraftRestoreKey='';let draftAutosaveTimer=null;let reportStatusCache={};let isCheckingReportStatus=false;let lastReportStatusCheckKey='';let reportStatusCheckTimer=null;
 function money(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{style:'currency',currency:'EUR'})}function num(id){return parseFloat(($(id)?.value||'').replace(',','.'))||0}function val(id){return ($(id)?.value||'').trim()}function restoLabel(){return val('restaurant')==='boulogne'?'Boulogne-sur-Mer':val('restaurant')==='armentieres'?'Armentières':'-'}
 function showToast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2600)}
 function localISODate(d=new Date()){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')}
@@ -210,10 +210,79 @@ function reportUniqueKey(){return val('dateService')&&val('restaurant')&&val('se
 function reportHumanLabel(){return `${restoLabel()} · ${val('dateService')||'-'} · ${val('service')==='matin'?'Matin':'Soir'}`}
 function isReportAlreadySent(){const k=reportUniqueKey();return !!k&&localStorage.getItem(k)==='sent'}
 function sentReportKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`competition_reporting_sent_${dateService}_${restaurantCode}_${service}`:''}
-function isReportSentFor(dateService,restaurantCode,service){const k=sentReportKey(dateService,restaurantCode,service);return !!k&&localStorage.getItem(k)==='sent'}
+function serverReportCacheKey(dateService,restaurantCode,service){return dateService&&restaurantCode&&service?`${dateService}_${restaurantCode}_${service}`:''}
+function isReportSentLocal(dateService,restaurantCode,service){const k=sentReportKey(dateService,restaurantCode,service);return !!k&&localStorage.getItem(k)==='sent'}
+function isReportStatusChecked(dateService,restaurantCode,service){const k=serverReportCacheKey(dateService,restaurantCode,service);return !!(k&&reportStatusCache[k]&&reportStatusCache[k].checkedAt)}
+function isReportStatusUnknown(dateService,restaurantCode,service){return !!(APPS_SCRIPT_URL&&dateService&&restaurantCode&&service&&!isReportSentLocal(dateService,restaurantCode,service)&&!isReportStatusChecked(dateService,restaurantCode,service))}
+function isReportSentFor(dateService,restaurantCode,service){const k=serverReportCacheKey(dateService,restaurantCode,service);if(k&&reportStatusCache[k]?.exists)return true;return isReportSentLocal(dateService,restaurantCode,service)}
+function appsScriptJsonp(params={},timeoutMs=9000){
+  return new Promise((resolve,reject)=>{
+    if(!APPS_SCRIPT_URL){resolve(null);return}
+    const cb='reporting_jsonp_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    const sep=APPS_SCRIPT_URL.includes('?')?'&':'?';
+    const query=Object.entries({...params,callback:cb,_:Date.now()}).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v??'')}`).join('&');
+    const script=document.createElement('script');
+    let done=false;
+    const cleanup=()=>{try{delete window[cb]}catch(e){window[cb]=undefined}script.remove()};
+    const timer=setTimeout(()=>{if(done)return;done=true;cleanup();reject(new Error('Timeout vérification Google Sheets'))},timeoutMs);
+    window[cb]=(data)=>{if(done)return;done=true;clearTimeout(timer);cleanup();resolve(data||{})};
+    script.onerror=()=>{if(done)return;done=true;clearTimeout(timer);cleanup();reject(new Error('Erreur chargement Apps Script'))};
+    script.src=APPS_SCRIPT_URL+sep+query;
+    document.body.appendChild(script);
+  })
+}
+function cacheServerReportStatus(dateService,restaurantCode,service,data){
+  const cacheKey=serverReportCacheKey(dateService,restaurantCode,service);
+  if(!cacheKey)return;
+  const exists=!!(data&&data.exists);
+  const payload=data?.payload||data?.rapportPayload||null;
+  reportStatusCache[cacheKey]={exists,payload,checkedAt:Date.now(),raw:data||null};
+  if(exists){
+    const sentKey=sentReportKey(dateService,restaurantCode,service);
+    localStorage.setItem(sentKey,'sent');
+    localStorage.setItem(sentKey+'_sentAt',data?.sentAt||data?.createdAt||new Date().toISOString());
+    if(payload){try{localStorage.setItem(sentKey+'_payload',JSON.stringify(payload))}catch(e){}}
+  }
+}
+async function checkReportOnServer(dateService,restaurantCode,service,force=false){
+  if(!APPS_SCRIPT_URL||!dateService||!restaurantCode||!service)return null;
+  const cacheKey=serverReportCacheKey(dateService,restaurantCode,service);
+  if(!force&&reportStatusCache[cacheKey]?.checkedAt)return reportStatusCache[cacheKey];
+  const data=await appsScriptJsonp({action:'checkReport',dateService,restaurantCode,service});
+  cacheServerReportStatus(dateService,restaurantCode,service,data);
+  return reportStatusCache[cacheKey]||null;
+}
+function dependencyStatusTargets(){
+  if(!commonComplete())return [];
+  const d=val('dateService'),r=val('restaurant'),s=val('service');
+  const targets=[{dateService:d,restaurantCode:r,service:s}];
+  if(s==='soir')targets.push({dateService:d,restaurantCode:r,service:'matin'});
+  if(s==='matin'){
+    const prev=previousDateISO(d);
+    if(prev)targets.push({dateService:prev,restaurantCode:r,service:'soir'});
+  }
+  return targets;
+}
+function hasPendingReportStatusCheck(){return dependencyStatusTargets().some(t=>isReportStatusUnknown(t.dateService,t.restaurantCode,t.service))}
+async function ensureReportStatusesFromServer(force=false){
+  if(!commonComplete()||!APPS_SCRIPT_URL)return;
+  isCheckingReportStatus=true;
+  updateSubmitButtonState();
+  try{await Promise.all(dependencyStatusTargets().map(t=>checkReportOnServer(t.dateService,t.restaurantCode,t.service,force)))}catch(e){console.error(e);setSendStatus('Impossible de vérifier Google Sheets. Vérifie que le doGet checkReport est ajouté dans Apps Script.','warn')}
+  isCheckingReportStatus=false;
+  updateSubmitButtonState();
+}
+function scheduleReportStatusCheck(force=false){
+  if(!commonComplete()||!APPS_SCRIPT_URL)return;
+  const key=dependencyStatusTargets().map(t=>`${t.dateService}_${t.restaurantCode}_${t.service}`).join('|');
+  if(!force&&key===lastReportStatusCheckKey&&!hasPendingReportStatusCheck())return;
+  lastReportStatusCheckKey=key;
+  clearTimeout(reportStatusCheckTimer);
+  reportStatusCheckTimer=setTimeout(()=>ensureReportStatusesFromServer(force),250);
+}
 function previousDateISO(dateISO){if(!dateISO)return '';const parts=dateISO.split('-').map(Number);if(parts.length!==3||parts.some(Number.isNaN))return '';const d=new Date(parts[0],parts[1]-1,parts[2]);d.setDate(d.getDate()-1);return localISODate(d)}
-function sendDependencyMessage(){if(!commonComplete())return '';const d=val('dateService'),r=val('restaurant'),s=val('service');if(s==='soir'&&!isReportSentFor(d,r,'matin'))return `Impossible d’envoyer le rapport Soir : il faut d’abord envoyer le rapport Matin du ${d} pour ${restoLabel()}.`;return ''}
-function hasMorningPreviousReportMissing(){if(!commonComplete()||val('service')!=='matin')return false;const prev=previousDateISO(val('dateService'));return !!(prev&&!isReportSentFor(prev,val('restaurant'),'soir'))}
+function sendDependencyMessage(){if(!commonComplete())return '';const d=val('dateService'),r=val('restaurant'),s=val('service');if(s==='soir'){if(isReportStatusUnknown(d,r,'matin'))return '';if(!isReportSentFor(d,r,'matin'))return `Impossible d’envoyer le rapport Soir : il faut d’abord envoyer le rapport Matin du ${d} pour ${restoLabel()}.`;}return ''}
+function hasMorningPreviousReportMissing(){if(!commonComplete()||val('service')!=='matin')return false;const prev=previousDateISO(val('dateService'));if(!prev)return false;if(isReportStatusUnknown(prev,val('restaurant'),'soir'))return false;return !isReportSentFor(prev,val('restaurant'),'soir')}
 function morningDependencyWarningKey(){return val('dateService')&&val('restaurant')?`competition_reporting_morning_warning_skipped_${val('dateService')}_${val('restaurant')}`:''}
 function shouldShowMorningDependencyWarning(){const k=morningDependencyWarningKey();return !!(hasMorningPreviousReportMissing()&&(!k||sessionStorage.getItem(k)!=='skipped'))}
 function morningDependencyWarningMessage(){const prev=previousDateISO(val('dateService'));return `Le rapport de la veille (${prev}) n’est pas fait pour ${restoLabel()}. Informe Omar avant de commencer le rapport. Tu peux skipper ce message pour remplir le rapport. Après validation, il sera enregistré en brouillon et l’envoi se fera uniquement après l’accord oral d’Omar.`}
@@ -226,7 +295,7 @@ function closeMorningDraftOverlay(){const overlay=$('morningDraftOverlay');if(ov
 function sendMorningDraftAfterOmar(){morningDependencyWarningForceSend=true;closeMorningDraftOverlay();validateReport()}
 function markReportSent(payload){const k=reportUniqueKey();if(!k)return;localStorage.setItem(k,'sent');localStorage.setItem(k+'_sentAt',new Date().toISOString());try{localStorage.setItem(k+'_payload',JSON.stringify(payload))}catch(e){}}
 function setSendStatus(msg,type=''){const el=$('sendStatus');if(!el)return;el.textContent=msg||'';el.className='send-status'+(msg?' show':'')+(type?' '+type:'')}
-function updateSubmitButtonState(){const btn=$('validateBtn');if(!btn)return;btn.classList.remove('hidden');if(isSendingReport){btn.disabled=true;btn.textContent='Envoi en cours...';return}if(isReportAlreadySent()){btn.disabled=true;btn.textContent='Rapport déjà envoyé';setSendStatus(`Ce rapport a déjà été envoyé : ${reportHumanLabel()}.`,'ok');return}const depMsg=sendDependencyMessage();if(depMsg){btn.disabled=true;btn.textContent='Envoi bloqué';setSendStatus(depMsg,'warn');return}if(hasMorningPreviousReportMissing()){btn.classList.add('hidden');btn.disabled=true;setSendStatus('Rapport de la veille non fait : informe Omar. Le bouton envoyer est masqué. Enregistre le brouillon, puis envoie uniquement après l’accord oral d’Omar.','warn');return}btn.disabled=false;btn.textContent='Valider le rapport';setSendStatus('', '')} 
+function updateSubmitButtonState(){const btn=$('validateBtn');if(!btn)return;btn.classList.remove('hidden');if(isSendingReport){btn.disabled=true;btn.textContent='Envoi en cours...';return}if(commonComplete()&&(isCheckingReportStatus||hasPendingReportStatusCheck())){btn.disabled=true;btn.textContent='Vérification...';setSendStatus('Vérification dans Google Sheets : rapport déjà envoyé, rapport matin et rapport de la veille.','warn');return}if(isReportAlreadySent()){btn.disabled=true;btn.textContent='Rapport déjà envoyé';setSendStatus(`Ce rapport a déjà été envoyé : ${reportHumanLabel()}.`,'ok');return}const depMsg=sendDependencyMessage();if(depMsg){btn.disabled=true;btn.textContent='Envoi bloqué';setSendStatus(depMsg,'warn');return}if(hasMorningPreviousReportMissing()){btn.classList.add('hidden');btn.disabled=true;setSendStatus('Rapport de la veille non fait : informe Omar. Le bouton envoyer est masqué. Enregistre le brouillon, puis envoie uniquement après l’accord oral d’Omar.','warn');return}btn.disabled=false;btn.textContent='Valider le rapport';setSendStatus('', '')} 
 function parseTimeMinutes(value){const raw=String(value||'').trim().toLowerCase();if(!raw)return null;let h=null,m=null;let match=raw.match(/^(\d{1,2})\s*(?:h|:|\.)\s*(\d{0,2})/);if(match){h=parseInt(match[1],10);m=match[2]===''?0:parseInt(match[2],10)}else{const digits=raw.replace(/\D/g,'');if(digits.length===4){h=parseInt(digits.slice(0,2),10);m=parseInt(digits.slice(2),10)}else if(digits.length===3){h=parseInt(digits.slice(0,1),10);m=parseInt(digits.slice(1),10)}else if(digits.length===1||digits.length===2){h=parseInt(digits,10);m=0}}if(h===null||m===null||Number.isNaN(h)||Number.isNaN(m))return null;if(h<0||h>23||m<0||m>59)return null;return h*60+m}
 function cleanTime(value){const mins=parseTimeMinutes(value);if(mins===null)return String(value||'').trim();const h=Math.floor(mins/60),m=mins%60;return String(h).padStart(2,'0')+'H'+String(m).padStart(2,'0')+'min'}
 function diffHours(start,end){const s=parseTimeMinutes(start),e=parseTimeMinutes(end);if(s===null||e===null)return 0;let mins=e-s;if(mins<0)mins+=24*60;return Math.round((mins/60)*100)/100}
@@ -296,7 +365,7 @@ function scheduleDraftAutosave(){
   clearTimeout(draftAutosaveTimer);
   draftAutosaveTimer=setTimeout(()=>saveDraftLocalSilent(),350);
 }
-function getStoredPayload(service){return readLocalJson(sentPayloadKey(service))||readLocalJson(localPayloadKey(service))}
+function getStoredPayload(service){const server=reportStatusCache[serverReportCacheKey(val('dateService'),val('restaurant'),service)]?.payload||null;return server||readLocalJson(sentPayloadKey(service))||readLocalJson(localPayloadKey(service))}
 function getMorningPayload(){return val('service')==='soir'?getStoredPayload('matin'):null}
 function getMorningProductValue(productId,field){const payload=getMorningPayload();if(!payload)return 0;const sources=[payload?.donneesService?.pertesService?.pertesParProduit,payload?.googleSheets?.pertesService?.pertesParProduit,payload?.donneesService?.stocks,payload?.googleSheets?.stocks];for(const rows of sources){if(Array.isArray(rows)){const row=rows.find(x=>x.codeProduit===productId);if(row&&row[field]!==undefined)return parseFloat(row[field])||0}}return 0}
 function getMorningHeuresPrevuesPlanning(){const payload=getMorningPayload();if(!payload)return 0;return parseFloat(payload?.donneesService?.rh?.heuresPrevuesPlanningSaisie??payload?.donneesService?.rh?.heuresPrevuesPlanning??payload?.googleSheets?.rapport?.heuresPrevuesPlanningSaisie??payload?.googleSheets?.rapport?.heuresPrevuesPlanning??0)||0}
@@ -364,7 +433,7 @@ function updateServiceLabels(){
   const note=$('caLogicNote');if(note)note.textContent=armentieres?'Armentières : Uber Eats et Deliveroo ne sont pas compris dans le Ticket Z global. Le calcul Bornes & Caisse déduit uniquement le Click & Collect. Le soir reste cumulatif sur la journée.':'Boulogne : le CA global Ticket Z comprend Uber Eats, Deliveroo et Click & Collect. Le calcul Bornes & Caisse déduit Uber + Deliveroo + C&C. Le soir reste cumulatif sur la journée.';
 }
 function serviceRules(){return {caSaisie:val('service')==='soir'?'cumul_journee_matin_plus_soir':'service_matin',caBornesEtCaisse:isArmentieres()?'armentieres_ca_global_moins_click_collect_uniquement':'boulogne_ca_global_moins_uber_deliveroo_click_collect',rhSaisie:val('service')==='soir'?'heures_planning_cumul_journee_matin_plus_soir':'service_selectionne',stockSaisie:val('service')==='soir'?'stock_restant_fin_journee':'stock_initial_journee',pertesKgProduits:val('service')==='soir'?'cumul_journee_matin_plus_soir':'service_matin',montantsErreursPertes:val('service')==='soir'?'cumul_journee_matin_plus_soir':'service_matin',dashboardCalculSoir:'soir_reel = cumul_soir - matin_du_meme_restaurant_meme_date'}}
-function refresh(){setDateBounds();if(lastStockService!==val('service')){lastStockService=val('service');buildStocks();}handleGate();restoreDraftIfAvailable();updateServiceLabels();stockProducts.forEach(p=>{const totalEl=$(`total_${p.id}`);if(totalEl)totalEl.textContent=stockTotalKg(p).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg'});const totalDosesEl=$('total_doses_vendues');if(totalDosesEl)totalDosesEl.textContent=dosesVenduesTotal().toLocaleString('fr-FR');const totalPertesKgEl=$('total_pertes_produits_kg');if(totalPertesKgEl)totalPertesKgEl.textContent=pertesProduitsKgTotal().toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg';const ca=num('caTotal'),cmd=num('cmdTotal'),ticket=cmd?ca/cmd:0,bCA=caBornesCalc(),bCmd=cmdBornesCalc(),pertes=pertesTotalCalc(),hReel=heuresReellesCalc();$('caBornes').value=money(bCA);$('cmdBornes').value=bCmd;$('totalPertesService').value=money(pertes);$('heuresReellesCalc').value=hReel?hReel.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' h':'';$('sumCA').textContent=money(ca);$('sumCmd').textContent=cmd;$('sumTicketMoyen').textContent=money(ticket);$('sumPertes').textContent=money(pertes);$('heroRestaurant').textContent=commonComplete()?restoLabel():'-';$('heroDate').textContent=val('dateService')||'-';const p=completion();$('progress').style.width=p+'%';$('progressText').textContent=commonComplete()?`${p}% complété · ${restoLabel()} · ${val('dateService')} · Service ${val('service')}`:'Renseigne les informations communes pour afficher le formulaire.';conditionals();updateSubmitButtonState();handleMorningDependencyWarningOnCommonComplete();scheduleDraftAutosave()}
+function refresh(){setDateBounds();if(lastStockService!==val('service')){lastStockService=val('service');buildStocks();}handleGate();restoreDraftIfAvailable();updateServiceLabels();stockProducts.forEach(p=>{const totalEl=$(`total_${p.id}`);if(totalEl)totalEl.textContent=stockTotalKg(p).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg'});const totalDosesEl=$('total_doses_vendues');if(totalDosesEl)totalDosesEl.textContent=dosesVenduesTotal().toLocaleString('fr-FR');const totalPertesKgEl=$('total_pertes_produits_kg');if(totalPertesKgEl)totalPertesKgEl.textContent=pertesProduitsKgTotal().toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' kg';const ca=num('caTotal'),cmd=num('cmdTotal'),ticket=cmd?ca/cmd:0,bCA=caBornesCalc(),bCmd=cmdBornesCalc(),pertes=pertesTotalCalc(),hReel=heuresReellesCalc();$('caBornes').value=money(bCA);$('cmdBornes').value=bCmd;$('totalPertesService').value=money(pertes);$('heuresReellesCalc').value=hReel?hReel.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' h':'';$('sumCA').textContent=money(ca);$('sumCmd').textContent=cmd;$('sumTicketMoyen').textContent=money(ticket);$('sumPertes').textContent=money(pertes);$('heroRestaurant').textContent=commonComplete()?restoLabel():'-';$('heroDate').textContent=val('dateService')||'-';const p=completion();$('progress').style.width=p+'%';$('progressText').textContent=commonComplete()?`${p}% complété · ${restoLabel()} · ${val('dateService')} · Service ${val('service')}`:'Renseigne les informations communes pour afficher le formulaire.';conditionals();scheduleReportStatusCheck(false);updateSubmitButtonState();handleMorningDependencyWarningOnCommonComplete();scheduleDraftAutosave()}
 function requiredFieldsForCurrentService(){
   let req=['dateService','restaurant','responsable','service'];
   if(!['matin','soir'].includes(val('service'))) return req;
@@ -401,7 +470,8 @@ function isVisible(el){return !!(el.offsetWidth||el.offsetHeight||el.getClientRe
 function markInvalid(el,state){if(el)el.classList.toggle('invalid',!!state)}
 function rowsComplete(rows,keys){return rows.every(r=>keys.every(k=>String(r[k]??'').trim()!==''&&(k==='montant'?parseFloat(r[k])>=0:true)))}
 function validateAll(checkDependencies=true){renderResponsablesErreurs();qsa('.invalid').forEach(el=>el.classList.remove('invalid'));qsa('.scale span.invalid').forEach(el=>el.classList.remove('invalid'));if(!commonComplete()){showToast('Complète d’abord les informations communes.');return false}if(!isAllowedDate()){markInvalid($('dateService'),true);showToast('Date autorisée : aujourd’hui ou hier uniquement, sauf mot de passe.');return false}if(isReportAlreadySent()){showToast('Ce rapport a déjà été envoyé pour ce restaurant, cette date et ce service.');updateSubmitButtonState();return false}if(checkDependencies){const depMsg=sendDependencyMessage();if(depMsg){setSendStatus(depMsg,'warn');showToast(depMsg);updateSubmitButtonState();return false}}let ok=true;requiredFieldsForCurrentService().forEach(id=>{if(['fluidite','qualite','satisfaction','placement','motivation','recuperation'].includes(id)){if(!scaleVal(id)){qsa(`input[name="${id}"]`).forEach(i=>i.closest('label')?.querySelector('span')?.classList.add('invalid'));ok=false}}else{const el=$(id);if(el&&!el.disabled&&isVisible(el)&&!String(el.value||'').trim()){markInvalid(el,true);ok=false}}});if(val('huileChangement')==='Oui'){if(!isAllowedHuileDate()){markInvalid($('huileDate'),true);ok=false}if(!friteusesSelectionnees().length){markInvalid($('huileFriteusesWrap'),true);ok=false}}if(val('hasReductions')==='Oui'&&!rowsComplete(reductions,['numero','montant','explication']))ok=false;if(val('hasRefaits')==='Oui'&&!rowsComplete(refaits,['numero','article','montant','explication']))ok=false;if(val('hasHeuresSupp')==='Oui'&&!rowsComplete(heuresSupp,['nom','debut','fin','motif']))ok=false;if(!ok)showToast('Complète tous les champs obligatoires affichés.');return ok}
-function saveLocal(){
+async function saveLocal(){
+  await ensureReportStatusesFromServer(false);
   if(hasMorningPreviousReportMissing()){
     if(!commonComplete()){showToast('Complète d’abord les informations communes pour enregistrer le brouillon.');return}
     const canOpenSendModal=completion()>=100&&validateAll(false);
@@ -417,6 +487,7 @@ function saveLocal(){
 }
 async function validateReport(){
   if(isSendingReport)return;
+  await ensureReportStatusesFromServer(false);
   if(!validateAll())return;
   const payload=collect();
   saveDraftLocalSilent(payload);
